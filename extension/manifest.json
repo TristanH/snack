@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Snack",
+  "version": "0.3.0",
+  "description": "A thread inbox for Slack: every thread you're in, sorted by latest message.",
+  "action": { "default_title": "Open Snack" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage"],
+  "host_permissions": ["https://*.slack.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://app.slack.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:4477/*", "http://127.0.0.1:4477/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

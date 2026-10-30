@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Snack</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧵</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Shown while connecting, or when no Slack session is available -->
+  <section id="connect" class="setup">
+    <div class="setup-card">
+      <h1>Snack</h1>
+      <p id="connect-message" class="muted">Connecting to Slack…</p>
+      <div id="connect-actions" class="connect-actions" hidden>
+        <a href="https://app.slack.com/client" target="_blank" rel="noreferrer">Open Slack to sign in</a>
+        <button id="connect-retry" type="button">Retry</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand">snack</div>
+      <div class="views segmented">
+        <button data-view="inbox" class="active" data-shortcut="inbox">Inbox <span id="inbox-count"></span></button>
+        <button data-view="channels" data-shortcut="channels">Channels <span id="channels-count"></span></button>
+      </div>
+      <div class="search">
+        <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
+      </div>
+      <div class="filters segmented" data-view="inbox">
+        <button data-filter="all" class="active" data-shortcut="filter1">All</button>
+        <button data-filter="unread" data-shortcut="filter2">Unread <span id="unread-count"></span></button>
+        <button data-filter="archived" data-shortcut="filter3">Archived</button>
+      </div>
+      <div class="spacer"></div>
+      <span id="status" class="muted small"></span>
+      <button id="refresh" class="icon-btn" data-shortcut="refresh">↻</button>
+      <button id="help-btn" class="icon-btn" data-shortcut="help">?</button>
+      <span id="me" class="muted small"></span>
+    </header>
+
+    <main class="panes">
+      <nav class="list-pane">
+        <ul id="thread-list" class="thread-list"></ul>
+        <div id="list-footer" class="list-footer muted small"></div>
+      </nav>
+      <section id="detail" class="detail-pane">
+        <div class="empty muted">
+          <p>Select a thread</p>
+          <p class="small"><kbd>J</kbd> <kbd>K</kbd> move · <kbd>↵</kbd> open · <kbd>E</kbd> archive · <kbd>R</kbd> reply</p>
+          <p class="small">Press <kbd>?</kbd> for all keyboard shortcuts</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <div id="emoji-picker" class="emoji-picker" hidden>
+    <input type="text" placeholder="Search emoji" autocomplete="off" spellcheck="false" />
+    <div class="emoji-grid"></div>
+    <div class="emoji-footer"><span class="emoji-name"></span><span class="muted"><kbd>↵</kbd> pick · <kbd>Esc</kbd> close</span></div>
+  </div>
+  <div id="lightbox" class="lightbox" hidden data-tip="Close (Esc)"><img alt="" /></div>
+  <div id="help" class="help-backdrop" hidden>
+    <div class="help-card" role="dialog" aria-label="Keyboard shortcuts">
+      <div class="help-head"><h2>Keyboard shortcuts</h2><button class="icon-btn" id="help-close" data-shortcut="close">×</button></div>
+      <div id="help-body" class="help-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@
   --surface: #ffffff;
   --surface-2: #f0f0ed;
   --border: #e4e4e0;
+  --border-strong: #cfcec9; /* A touch firmer than --border, for focus. Never heavier than this. */
   --text: #1d1c1d;
   --muted: #6b6a6b;
   --accent: #2f6fde;
@@ -28,6 +29,7 @@
     --surface: #1e1f22;
     --surface-2: #26272b;
     --border: #2f3035;
+    --border-strong: #3e4046;
     --text: #e8e8e6;
     --muted: #9a9a9f;
     --accent: #6ea1ff;
@@ -102,7 +104,7 @@ kbd {
   background: var(--surface);
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; padding-left: 16px; min-width: 0; }
-.topbar-right { display: flex; align-items: center; gap: 12px; padding-right: 16px; min-width: 0; }
+.topbar-right { display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0.5px; min-width: 0; }
 .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 16px; }
 .search input {
   width: 280px;
@@ -121,8 +123,9 @@ kbd {
 .spacer { flex: 1; }
 #status {
   flex: none;
-  width: 130px;
-  text-align: right;
+  width: 120px;
+  padding-left: 8px;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -213,7 +216,7 @@ kbd {
   border: 1px solid var(--border);
   background: var(--bg);
 }
-.search .filter-box:focus-within { border-color: var(--accent); }
+.search .filter-box:focus-within { border-color: var(--border-strong); }
 .filter-scroll {
   display: flex;
   align-items: center;
@@ -245,13 +248,16 @@ kbd {
   min-width: 0;
   max-width: 240px;
   padding: 1px 2px 1px 7px;
-  border-radius: 10px;
-  background: var(--accent-soft);
+  border-radius: 4px;
+  /* Same weight as the box it sits in — a nested element must never outrank
+     its container. The fill is what separates it; the border just crisps it. */
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   color: var(--text);
   font-size: 12px;
   white-space: nowrap;
 }
-.filter-chip b { color: var(--accent); font-weight: 600; flex: none; }
+.filter-chip b { color: var(--muted); font-weight: 600; flex: none; }
 .filter-chip .chip-v { overflow: hidden; text-overflow: ellipsis; }
 .filter-chip .chip-x {
   border: 0;
@@ -262,7 +268,7 @@ kbd {
   padding: 0 4px;
   cursor: pointer;
 }
-.filter-chip .chip-x:hover { color: var(--danger); }
+.filter-chip .chip-x:hover { color: var(--text); }
 .filter-popup {
   position: absolute;
   top: calc(100% + 6px);
@@ -291,9 +297,9 @@ kbd {
   font-size: 13px;
   cursor: pointer;
 }
-.filter-row b { font-weight: 600; color: var(--accent); }
+.filter-row b { font-weight: 600; color: var(--text); }
 .filter-row .muted { margin-left: auto; font-size: 12px; }
-.filter-row.active, .filter-row:hover { background: var(--selected); }
+.filter-row.active, .filter-row:hover { background: var(--surface-2); }
 .tag { font-size: 11px; font-weight: 600; border-radius: 4px; padding: 0 5px; }
 .tag.replied { color: var(--muted); border: 1px solid var(--border); }
 .tag.todo { color: var(--mention); background: var(--mention-bg); }

@@ -61,10 +61,10 @@ export function attachFilters(input, { facets, chips, onChange }) {
     chipsEl.innerHTML = current()
       .map((c, i) => {
         const pinned = isPinned(c);
-        const tip = `${c.facetLabel} ${c.label}`;
+        const tip = `${c.facetLabel}: ${c.label}`;
         return `<span class="filter-chip${pinned ? ' pinned' : ''}" data-i="${i}" title="${escapeHtml(tip)}"><b>${escapeHtml(
           c.facetLabel,
-        )}</b><span class="chip-v">${escapeHtml(c.label)}</span>${
+        )}:</b><span class="chip-v">${escapeHtml(c.label)}</span>${
           pinned ? '<span class="chip-caret" aria-hidden="true"></span>' : `<button class="chip-x" data-remove="${i}" aria-label="Remove">×</button>`
         }</span>`;
       })

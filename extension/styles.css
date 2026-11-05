@@ -176,6 +176,8 @@ kbd {
 .type-pill.thread { color: var(--accent); background: var(--accent-soft); }
 .type-pill.dm { color: var(--dm); background: var(--dm-bg); }
 .type-pill.mention { color: var(--mention); background: var(--mention-bg); }
+.type-pill.working { color: var(--dm); background: var(--dm-bg); }
+.type-pill.done { color: var(--muted); background: var(--surface-2); }
 .tag { font-size: 11px; font-weight: 600; border-radius: 4px; padding: 0 5px; }
 .tag.replied { color: var(--muted); border: 1px solid var(--border); }
 .tag.todo { color: var(--mention); background: var(--mention-bg); }

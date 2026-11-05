@@ -26,6 +26,7 @@
       <div class="views segmented">
         <button data-view="inbox" class="active" data-shortcut="inbox">Inbox <span id="inbox-count"></span></button>
         <button data-view="channels" data-shortcut="channels">Channels <span id="channels-count"></span></button>
+        <button data-view="gregbot" data-shortcut="gregbot">Gregbot <span id="gregbot-count"></span></button>
       </div>
       <div class="search">
         <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
@@ -34,6 +35,11 @@
         <button data-filter="all" class="active" data-shortcut="filter1">All</button>
         <button data-filter="unread" data-shortcut="filter2">Unread <span id="unread-count"></span></button>
         <button data-filter="archived" data-shortcut="filter3">Archived</button>
+      </div>
+      <div class="filters segmented" data-view="gregbot" hidden>
+        <button data-filter="working" class="active" data-shortcut="filter1">Working <span id="working-count"></span></button>
+        <button data-filter="3d" data-shortcut="filter2">3d</button>
+        <button data-filter="7d" data-shortcut="filter3">7d</button>
       </div>
       <div class="spacer"></div>
       <span id="status" class="muted small"></span>

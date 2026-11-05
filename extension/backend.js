@@ -7,6 +7,7 @@ import { ThreadService } from './lib/threads.js';
 import { ChannelService } from './lib/channels.js';
 import { MentionService } from './lib/mentions.js';
 import { DmService } from './lib/dms.js';
+import { GregbotService } from './lib/gregbot.js';
 import { mergeInbox } from './lib/inbox.js';
 import * as platform from './platform.js';
 
@@ -25,8 +26,9 @@ async function open(team) {
   const channels = new ChannelService(slack, directory);
   const mentions = new MentionService(slack, directory, auth.user_id);
   const dms = new DmService(slack, directory, auth.user_id);
+  const gregbot = new GregbotService(slack, directory);
   await Promise.all([directory.load(), threads.load()]);
-  return { slack, directory, threads, channels, mentions, dms, auth };
+  return { slack, directory, threads, channels, mentions, dms, gregbot, auth };
 }
 
 // The saved token goes stale when Slack rotates it; in that case load Slack
@@ -186,6 +188,13 @@ export const getInbox = ({ full = false, onUpdate } = {}) =>
   });
 
 export const getConversation = (channel, lastRead) => withSession((s) => s.dms.conversation(channel, lastRead));
+
+// Threads gregbot is working in, newest activity first (see lib/gregbot.js).
+export const getGregbot = ({ days } = {}) =>
+  withSession(async (s) => {
+    await s.gregbot.refresh({ days });
+    return s.gregbot.snapshot();
+  });
 
 // Mentions. Seen state comes from Slack's read positions (client.counts for
 // channels, the thread inbox for threads).

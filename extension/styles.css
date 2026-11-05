@@ -94,13 +94,15 @@ kbd {
 /* ---------- Shell ---------- */
 .app { height: 100%; display: flex; flex-direction: column; }
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) 1fr;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
+.topbar-left { display: flex; align-items: center; gap: 12px; padding-left: 16px; min-width: 0; }
+.topbar-right { display: flex; align-items: center; gap: 12px; padding-right: 16px; min-width: 0; }
 .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 16px; }
 .search input {
   width: 280px;
@@ -117,6 +119,14 @@ kbd {
 .segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
 .views button { font-weight: 600; }
 .spacer { flex: 1; }
+#status {
+  flex: none;
+  width: 130px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .icon-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; width: 30px; height: 30px; font-size: 16px; }
 .icon-btn.spinning { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -189,10 +199,15 @@ kbd {
    its height however many chips you add. Nothing here may set `overflow`: this
    is the popup's positioned ancestor and would clip the menu — the inner
    .filter-scroll owns the overflow instead. */
+/* Fills the cell, so its width comes from the layout and never from how many
+   chips are in it — adding or removing a chip scrolls the row, never resizes
+   the box. */
+.search { flex: 1; min-width: 0; }
 .search .filter-box {
   position: relative;
-  min-width: 240px;
-  max-width: 46vw;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   padding: 3px 5px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -532,6 +547,9 @@ a.media { cursor: pointer; }
 
 @media (max-width: 760px) {
   .panes { grid-template-columns: 1fr; }
+  /* No divider to line up with: stack the two topbar cells instead. */
+  .topbar { grid-template-columns: 1fr; row-gap: 8px; }
+  .topbar-left { padding-right: 16px; }
   .detail-pane { display: none; }
   .app.show-detail .list-pane { display: none; }
   .app.show-detail .detail-pane { display: flex; }

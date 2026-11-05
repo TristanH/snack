@@ -22,25 +22,28 @@
 
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand">snack</div>
-      <div class="views segmented">
-        <button data-view="inbox" class="active" data-shortcut="inbox">Inbox <span id="inbox-count"></span></button>
-        <button data-view="channels" data-shortcut="channels">Channels <span id="channels-count"></span></button>
-        <button data-view="gregbot" data-shortcut="gregbot">Gregbot <span id="gregbot-count"></span></button>
+      <div class="topbar-left">
+        <div class="brand">snack</div>
+        <div class="views segmented">
+          <button data-view="inbox" class="active" data-shortcut="inbox">Inbox <span id="inbox-count"></span></button>
+          <button data-view="channels" data-shortcut="channels">Channels <span id="channels-count"></span></button>
+          <button data-view="gregbot" data-shortcut="gregbot">Gregbot <span id="gregbot-count"></span></button>
+        </div>
       </div>
-      <div class="search">
-        <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
+      <div class="topbar-right">
+        <div class="search">
+          <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
+        </div>
+        <div class="filters segmented" data-view="inbox">
+          <button data-filter="all" class="active" data-shortcut="filter1">All</button>
+          <button data-filter="unread" data-shortcut="filter2">Unread <span id="unread-count"></span></button>
+          <button data-filter="archived" data-shortcut="filter3">Archived</button>
+        </div>
+        <span id="status" class="muted small"></span>
+        <button id="refresh" class="icon-btn" data-shortcut="refresh">↻</button>
+        <button id="help-btn" class="icon-btn" data-shortcut="help">?</button>
+        <span id="me" class="muted small"></span>
       </div>
-      <div class="filters segmented" data-view="inbox">
-        <button data-filter="all" class="active" data-shortcut="filter1">All</button>
-        <button data-filter="unread" data-shortcut="filter2">Unread <span id="unread-count"></span></button>
-        <button data-filter="archived" data-shortcut="filter3">Archived</button>
-      </div>
-      <div class="spacer"></div>
-      <span id="status" class="muted small"></span>
-      <button id="refresh" class="icon-btn" data-shortcut="refresh">↻</button>
-      <button id="help-btn" class="icon-btn" data-shortcut="help">?</button>
-      <span id="me" class="muted small"></span>
     </header>
 
     <main class="panes">

@@ -34,11 +34,9 @@ const LEADING_EMOJI = /^(?::[\w+'-]+:\s*)+/;
 const SESSION_URL = /https:\/\/contextone\.dev\/dashboard\/computers\/\d+/;
 const DASH = /\s+[—–-]\s+/;
 
-// Things that happened somewhere in the thread (facet `has:`).
 const DID = {
   pr: /\bPR Ready\b/i,
   linear: /\bLinear: filed\b/i,
-  error: /\bfailed\b|\bcouldn[’']t\b/i,
 };
 // A live state, so it's only true of the newest message (facet `is:blocked`).
 const AWAITING_APPROVAL = /waiting for approval/i;

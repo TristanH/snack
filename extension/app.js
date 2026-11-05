@@ -810,7 +810,6 @@ function gregbotFacets() {
       values: some([
         { value: 'pr', label: 'A PR', count: countOf((t) => t.did?.pr) },
         { value: 'linear', label: 'A Linear ticket', count: countOf((t) => t.did?.linear) },
-        { value: 'error', label: 'Hit an error', count: countOf((t) => t.did?.error) },
       ]),
     },
     // Changes how far back we fetch, so only one at a time.

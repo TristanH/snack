@@ -22,24 +22,23 @@
 
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand">snack</div>
-      <div class="views segmented">
-        <button data-view="inbox" class="active" data-shortcut="inbox">Inbox <span id="inbox-count"></span></button>
-        <button data-view="channels" data-shortcut="channels">Channels <span id="channels-count"></span></button>
+      <div class="topbar-left">
+        <div class="brand" role="img" aria-label="Snack"><span aria-hidden="true">S</span><span class="brand-swap" aria-hidden="true"><span class="brand-l">l</span><span class="brand-n">n</span><svg class="brand-scratch" viewBox="-10 -3 56 71" fill="none" xmlns="http://www.w3.org/2000/svg"><path pathLength="1" d="M30.563 0C21.3963 3.33333 7.66676 12.4953 4.06298 17C2.06298 19.5 25.063 14.5 33.563 18C42.063 21.5 -4.78224 35.09 1.56298 36.5C6.063 37.5 26.063 37.5 32.063 34.5C37.0026 32.0302 6.86628 59.7322 1.56298 61.5C-7.43702 64.5 25.063 56.3333 32.063 52" stroke-width="4" stroke-linecap="round" /></svg></span><span class="brand-ack" aria-hidden="true">ack</span></div>
+        <div class="views">
+          <button data-view="inbox" class="active" data-shortcut="inbox">Inbox<span id="inbox-count" class="tab-count"></span></button>
+          <button data-view="channels" data-shortcut="channels">Channels<span id="channels-count" class="tab-count"></span></button>
+          <button data-view="gregbot" data-shortcut="gregbot">Gregbot<span id="gregbot-count" class="tab-dot"></span></button>
+        </div>
       </div>
-      <div class="search">
-        <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
+      <div class="topbar-right">
+        <div class="search">
+          <input id="search" type="search" placeholder="Filter inbox" autocomplete="off" data-shortcut="search" />
+        </div>
+        <span id="status" class="muted small"></span>
+        <button id="refresh" class="icon-btn" data-shortcut="refresh"><span class="icon-spin">↻</span></button>
+        <button id="help-btn" class="icon-btn" data-shortcut="help">?</button>
+        <span id="me" class="muted small"></span>
       </div>
-      <div class="filters segmented" data-view="inbox">
-        <button data-filter="all" class="active" data-shortcut="filter1">All</button>
-        <button data-filter="unread" data-shortcut="filter2">Unread <span id="unread-count"></span></button>
-        <button data-filter="archived" data-shortcut="filter3">Archived</button>
-      </div>
-      <div class="spacer"></div>
-      <span id="status" class="muted small"></span>
-      <button id="refresh" class="icon-btn" data-shortcut="refresh">↻</button>
-      <button id="help-btn" class="icon-btn" data-shortcut="help">?</button>
-      <span id="me" class="muted small"></span>
     </header>
 
     <main class="panes">

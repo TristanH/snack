@@ -781,7 +781,6 @@ function gregbotFacets() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   };
   const countOf = (test) => items.filter(test).length;
-  const some = (values) => values.filter((v) => v.count);
 
   return [
     { key: 'by', label: 'Initiated by', values: tally((t) => t.callers).map(([id, count]) => ({ value: id, label: userName(id), count })) },
@@ -789,28 +788,27 @@ function gregbotFacets() {
     {
       key: 'status',
       label: 'Status',
-      // Complementary, so OR-ing both would just mean "everything".
       exclusive: true,
-      values: some([
+      values: [
         { value: 'working', label: 'Working', count: countOf((t) => t.working) },
         { value: 'done', label: 'Done', count: countOf((t) => !t.working) },
-      ]),
+      ],
     },
     {
       key: 'is',
       label: 'Is',
-      values: some([
+      values: [
         { value: 'blocked', label: 'Blocked on approval', count: countOf((t) => t.blocked) },
         { value: 'quiet', label: 'Quiet — maybe stuck', count: countOf(isStale) },
-      ]),
+      ],
     },
     {
       key: 'has',
       label: 'Has',
-      values: some([
+      values: [
         { value: 'pr', label: 'A PR', count: countOf((t) => t.did?.pr) },
         { value: 'linear', label: 'A Linear ticket', count: countOf((t) => t.did?.linear) },
-      ]),
+      ],
     },
     // Changes how far back we fetch, so only one at a time.
     { key: 'age', label: 'Within', exclusive: true, values: [{ value: '3d', label: '3 days' }, { value: '7d', label: '7 days' }] },

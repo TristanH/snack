@@ -388,10 +388,10 @@ function renderList() {
   }
 
   const unread = state.inboxItems.filter((i) => i.unread && !isArchived(i)).length;
-  $('#inbox-count').textContent = unread ? `(${unread})` : '';
-  $('#channels-count').textContent = state.channelCounts.unread ? `(${state.channelCounts.unread})` : '';
+  $('#inbox-count').textContent = unread || '';
+  $('#channels-count').textContent = state.channelCounts.unread || '';
   const working = state.gregbotCounts.working || 0;
-  $('#gregbot-count').textContent = working ? `(${working})` : '';
+  $('#gregbot-count').classList.toggle('on', working > 0); // A dot, not a count.
 
   // No "load older": an old thread that gets a new reply comes back on its own.
   $('#list-footer').textContent = view.footer(items.length);

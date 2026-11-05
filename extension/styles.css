@@ -98,24 +98,35 @@ kbd {
 .topbar {
   display: grid;
   grid-template-columns: minmax(340px, 440px) 1fr;
-  align-items: center;
-  padding: 10px 0;
+  align-items: stretch;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.topbar-left { display: flex; align-items: center; gap: 12px; padding-left: 16px; min-width: 0; }
-.topbar-right { display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0.5px; min-width: 0; }
+.topbar-left {
+  display: flex;
+  align-items: stretch;
+  gap: 16px; /* Just a floor — margin-left: auto on .views does the spacing. */
+  padding-left: 16px;
+  padding-right: 12px; /* Keeps the last tab off the column divider. */
+  min-width: 0;
+  /* Sized so the 20px wordmark lands centred in the ~54px header: (54-20)/2.
+     The tabs share this, so they stay on the wordmark's baseline. */
+  --tab-baseline: 17px;
+}
+.topbar-right { display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 0.5px; min-width: 0; }
 
 /* ---------- Brand: "Slack → Snack" Animation ---------- */
 .brand {
   position: relative;
   font-weight: 800;
   letter-spacing: -0.02em;
-  font-size: 16px;
+  font-size: 20px;
   line-height: 1;
   white-space: nowrap;
   --brand-shift: 0.3em; /* Fallback; app.js replaces it with a measured value. */
   --brand-nudge: 0px; /* Optical tweak on top of the measured shift, if needed. */
+  align-self: flex-end;
+  padding-bottom: var(--tab-baseline);
   cursor: pointer; /* Hovering replays the animation, so it reads as interactive. */
   user-select: none;
 }
@@ -217,10 +228,42 @@ kbd {
   color: var(--text);
   font: inherit;
 }
-.segmented { display: flex; background: var(--surface-2); border-radius: 6px; padding: 2px; }
-.segmented button { border: 0; background: none; padding: 4px 10px; border-radius: 5px; font-size: 13px; color: var(--muted); }
-.segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
-.views button { font-weight: 600; }
+
+.views { display: flex; align-items: stretch; gap: 2px; margin-left: auto; }
+.views button {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: 0 10px calc(var(--tab-baseline) - 1px);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--muted);
+}
+.views button:hover { color: var(--text); }
+.views button.active { color: var(--text); font-weight: 700; border-bottom-color: var(--text); }
+
+.tab-count {
+  position: relative;
+  top: 1.5px;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.tab-count:empty { display: none; }
+.views button.active .tab-count { background: var(--border); color: var(--text); }
+.tab-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: var(--unread); }
+.tab-dot.on { display: block; }
 .spacer { flex: 1; }
 #status {
   flex: none;

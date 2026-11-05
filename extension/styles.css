@@ -105,7 +105,99 @@ kbd {
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; padding-left: 16px; min-width: 0; }
 .topbar-right { display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0.5px; min-width: 0; }
-.brand { font-weight: 800; letter-spacing: -0.02em; font-size: 16px; }
+
+/* ---------- Brand: "Slack → Snack" Animation ---------- */
+.brand {
+  position: relative;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 16px;
+  line-height: 1;
+  white-space: nowrap;
+  --brand-shift: 0.3em; /* Fallback; app.js replaces it with a measured value. */
+  --brand-nudge: 0.5px; /* Optical breathing room between the n and the a. */
+}
+
+.brand-swap { position: relative; display: inline-block; line-height: 1; }
+.brand-l, .brand-n { display: inline-block; line-height: 1; }
+.brand-n { position: absolute; left: 0; top: 0; }
+.brand-ack { display: inline-block; }
+
+.brand-l {
+  transform-origin: 50% 80%; /* --motion-origin-x/y from the spec. */
+  animation: brand-l-wobble 4s linear forwards, brand-l-out 4s linear forwards;
+}
+.brand-n {
+  transform-origin: 50% 80%;
+  animation: brand-n-spring 4s linear forwards, brand-n-fade 4s linear forwards;
+}
+.brand-ack { animation: brand-ack-room 4s linear forwards; }
+.brand-scratch {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.62em;
+  height: 0.78em;
+  transform: translate(-50%, -52%);
+  overflow: visible;
+  pointer-events: none;
+  color: #ff791f; /* The marker colour from the Figma file. */
+  animation: brand-scratch-show 4s linear forwards;
+}
+.brand-scratch path { stroke: currentColor; animation: brand-scratch-draw 4s linear forwards; }
+
+@keyframes brand-l-wobble {
+  0%, 19.375% { transform: rotate(0deg); }
+  21.563% { transform: rotate(-4deg); }
+  24.063% { transform: rotate(4deg); }
+  26.563% { transform: rotate(-3deg); }
+  29.375% { transform: rotate(2deg); }
+  34.375%, 100% { transform: rotate(0deg); }
+}
+@keyframes brand-l-out {
+  0%, 33.75% { opacity: 1; }
+  36.875%, 100% { opacity: 0; }
+}
+@keyframes brand-ack-room {
+  0% { transform: translateX(0); }
+  36.25% { transform: translateX(0); animation-timing-function: ease-in-out; }
+  41.25%, 100% { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
+}
+@keyframes brand-n-fade {
+  0%, 40.313% { opacity: 0; }
+  41.563%, 100% { opacity: 1; }
+}
+@keyframes brand-n-spring {
+  0%, 40.313% { transform: translateY(0.135em) rotate(8deg) scale(0.75, 0.75); animation-timing-function: ease-out; }
+  45.625% { transform: translateY(-0.063em) rotate(-3deg) scale(1.08, 1.1); animation-timing-function: ease-in-out; }
+  50% { transform: translateY(0.021em) rotate(-1.6deg) scale(0.97, 0.96); animation-timing-function: ease-out; }
+  55%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+}
+@keyframes brand-scratch-show {
+  0%, 13.75% { opacity: 0; }
+  14.063%, 44.375% { opacity: 1; }
+  44.688%, 100% { opacity: 0; }
+}
+/* pathLength="1" on the path makes these fractions of the whole stroke. */
+@keyframes brand-scratch-draw {
+  0%, 14.063% { stroke-dasharray: 0 1; stroke-dashoffset: 0; }
+  18.125% { stroke-dasharray: 0.18 1; }
+  21.563% { stroke-dasharray: 0.37 1; }
+  25% { stroke-dasharray: 0.58 1; }
+  29.063% { stroke-dasharray: 0.81 1; }
+  33.75% { stroke-dasharray: 1 1; stroke-dashoffset: 0; }
+  35.625% { stroke-dasharray: 1 1; stroke-dashoffset: 0; animation-timing-function: ease-in; }
+  44.375%, 100% { stroke-dasharray: 0 1; stroke-dashoffset: -1; }
+}
+
+/* Hold the finished "Snack" instead of looping. */
+@media (prefers-reduced-motion: reduce) {
+  .brand-l, .brand-n, .brand-ack, .brand-scratch, .brand-scratch path { animation: none; }
+  .brand-l { opacity: 0; }
+  .brand-n { opacity: 1; transform: none; }
+  .brand-ack { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
+  .brand-scratch { opacity: 0; }
+}
 .search input {
   width: 280px;
   max-width: 40vw;

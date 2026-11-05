@@ -1924,6 +1924,7 @@ function bindUi() {
   );
   $('#refresh').addEventListener('click', refreshView);
 
+  sizeBrand();
   document.addEventListener('keydown', onKeyDown);
   bindReactions();
   bindEmojiPicker();
@@ -1943,6 +1944,21 @@ function bindUi() {
   };
   setInterval(refreshAll, REFRESH_MS);
   document.addEventListener('visibilitychange', refreshAll);
+}
+
+function sizeBrand() {
+  const apply = () => {
+    const swap = $('.brand-swap');
+    const n = $('.brand-n');
+    if (!swap || !n) return;
+    // offsetWidth, not getBoundingClientRect: the n's spring animation starts
+    // at scale(0.75) rotate(8deg), and a client rect reports the *transformed*
+    // box — which measured ~0.7px narrow and crowded the n against the a.
+    const shift = n.offsetWidth - swap.offsetWidth;
+    if (shift > 0) $('.brand').style.setProperty('--brand-shift', `${shift}px`);
+  };
+  apply();
+  document.fonts?.ready.then(apply).catch(() => {});
 }
 
 function setFilter(view, filter) {

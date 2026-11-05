@@ -367,7 +367,6 @@ function renderList() {
   $('#channels-count').textContent = state.channelCounts.unread ? `(${state.channelCounts.unread})` : '';
   const working = state.gregbotCounts.working || 0;
   $('#gregbot-count').textContent = working ? `(${working})` : '';
-  $('#working-count').textContent = working ? `(${working})` : '';
 
   // No "load older": an old thread that gets a new reply comes back on its own.
   $('#list-footer').textContent = view.footer(items.length);
@@ -952,7 +951,6 @@ function setView(view) {
   $('.list-pane').scrollTop = 0;
   filterUi?.close();
   filterUi?.renderChips(); // Chips are per view.
-  syncFilterButtons();
   renderList();
   if (!currentView().isLoaded()) currentView().load();
 }
@@ -1727,9 +1725,9 @@ const SHORTCUTS = {
   channels: { group: 'Lists', label: 'Channels', show: ['C'], keys: ['c'], run: () => setView('channels') },
   gregbot: { group: 'Lists', label: 'Gregbot', show: ['G'], keys: ['g'], run: () => setView('gregbot') },
   toggleView: { group: 'Lists', label: 'Next list', show: ['`'], keys: ['`'], run: () => cycleView() },
-  filter1: { group: 'Lists', label: 'First filter', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
-  filter2: { group: 'Lists', label: 'Second filter', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
-  filter3: { group: 'Lists', label: 'Third filter', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
+  filter1: { group: 'Lists', label: 'Inbox: all', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
+  filter2: { group: 'Lists', label: 'Inbox: unread', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
+  filter3: { group: 'Lists', label: 'Inbox: archived', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
   search: { group: 'Lists', label: 'Filter list', show: ['/'], keys: ['/'], run: () => $('#search').focus() },
   refresh: { group: 'Lists', label: 'Refresh', show: ['⇧', 'R'], keys: ['Shift+R'], run: () => refreshView() },
 
@@ -1915,13 +1913,11 @@ function bindUi() {
     onChange: (next) => {
       const before = gregbotDays();
       state.chips[state.view] = next;
-      syncFilterButtons();
       renderList();
       // A wider Within window needs a deeper fetch.
       if (state.view === 'gregbot' && gregbotDays() !== before) loadGregbot();
     },
   });
-  syncFilterButtons(); // Highlight whatever state.chips starts with.
   document.querySelectorAll('.views button').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
   document.querySelectorAll('.filters button').forEach((btn) =>
     btn.addEventListener('click', () => setFilter(btn.closest('.filters').dataset.view, btn.dataset.filter)),
@@ -1949,26 +1945,7 @@ function bindUi() {
   document.addEventListener('visibilitychange', refreshAll);
 }
 
-// Gregbot's filter buttons are shortcuts for chips, so there's one filter
-// model rather than two competing ones. They toggle rather than act as a radio
-// group, and Status and Within are different facets, so Working + 3 days can
-// both be on.
-const GREGBOT_BUTTON_CHIPS = { working: ['status', 'working'], '3d': ['age', '3d'], '7d': ['age', '7d'] };
-
-function syncFilterButtons() {
-  const chips = chipsOf('gregbot');
-  document.querySelectorAll('.filters[data-view="gregbot"] button').forEach((b) => {
-    const [facet, value] = GREGBOT_BUTTON_CHIPS[b.dataset.filter] || [];
-    b.classList.toggle('active', chips.some((c) => c.facet === facet && c.value === value));
-  });
-}
-
 function setFilter(view, filter) {
-  if (view === 'gregbot') {
-    const [facet, value] = GREGBOT_BUTTON_CHIPS[filter] || [];
-    if (facet) filterUi?.toggle(facet, value); // onChange re-renders and syncs.
-    return;
-  }
   state.filters[view] = filter;
   document
     .querySelectorAll(`.filters[data-view="${view}"] button`)

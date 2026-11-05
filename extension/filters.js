@@ -82,15 +82,6 @@ export function attachFilters(input, { facets, chips, onChange }) {
 
   const removeAt = (i) => set(current().filter((_, n) => n !== i));
 
-  // Toggle from outside (the Working/3d/7d buttons use this).
-  function toggle(facet, value) {
-    const found = current().findIndex((c) => c.facet === facet && c.value === value);
-    if (found !== -1) return removeAt(found);
-    const f = facets().find((x) => x.key === facet);
-    const v = f?.values.find((x) => x.value === value);
-    if (f && v) addChip(facet, v);
-  }
-
   function close() {
     open = null;
     popup.hidden = true;
@@ -249,5 +240,5 @@ export function attachFilters(input, { facets, chips, onChange }) {
   });
 
   renderChips();
-  return { renderChips, toggle, close, isOpen: () => Boolean(open) && !popup.hidden };
+  return { renderChips, close, isOpen: () => Boolean(open) && !popup.hidden };
 }

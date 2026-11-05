@@ -116,6 +116,8 @@ kbd {
   white-space: nowrap;
   --brand-shift: 0.3em; /* Fallback; app.js replaces it with a measured value. */
   --brand-nudge: 0px; /* Optical tweak on top of the measured shift, if needed. */
+  cursor: pointer; /* Hovering replays the animation, so it reads as interactive. */
+  user-select: none;
 }
 
 .brand-swap { position: relative; display: inline-block; line-height: 1; }
@@ -123,15 +125,16 @@ kbd {
 .brand-n { position: absolute; left: 0; top: 0; }
 .brand-ack { display: inline-block; }
 
-.brand-l {
-  transform-origin: 50% 80%; /* --motion-origin-x/y from the spec. */
-  animation: brand-l-wobble 4s linear forwards, brand-l-out 4s linear forwards;
-}
-.brand-n {
-  transform-origin: 50% 80%;
-  animation: brand-n-spring 4s linear forwards, brand-n-fade 4s linear forwards;
-}
-.brand-ack { animation: brand-ack-room 4s linear forwards; }
+/* Resting state is "Slack": the n and the scratch are hidden until the
+   animation runs. Keeping them hidden by default is what lets .play be removed
+   and re-added to replay without a flash of both letters at once. */
+.brand-l { transform-origin: 50% 80%; /* --motion-origin-x/y from the spec. */ }
+.brand-n { transform-origin: 50% 80%; opacity: 0; }
+
+/* app.js adds .play on load and re-adds it on hover to restart. */
+.brand.play .brand-l { animation: brand-l-wobble 4s linear forwards, brand-l-out 4s linear forwards; }
+.brand.play .brand-n { animation: brand-n-spring 4s linear forwards, brand-n-fade 4s linear forwards; }
+.brand.play .brand-ack { animation: brand-ack-room 4s linear forwards; }
 .brand-scratch {
   position: absolute;
   left: 50%;
@@ -142,9 +145,11 @@ kbd {
   overflow: visible;
   pointer-events: none;
   color: #ff791f; /* The marker colour from the Figma file. */
-  animation: brand-scratch-show 4s linear forwards;
+  opacity: 0;
 }
-.brand-scratch path { stroke: currentColor; animation: brand-scratch-draw 4s linear forwards; }
+.brand-scratch path { stroke: currentColor; }
+.brand.play .brand-scratch { animation: brand-scratch-show 4s linear forwards; }
+.brand.play .brand-scratch path { animation: brand-scratch-draw 4s linear forwards; }
 
 @keyframes brand-l-wobble {
   0%, 19.375% { transform: rotate(0deg); }
@@ -192,11 +197,15 @@ kbd {
 
 /* Hold the finished "Snack" instead of looping. */
 @media (prefers-reduced-motion: reduce) {
-  .brand-l, .brand-n, .brand-ack, .brand-scratch, .brand-scratch path { animation: none; }
-  .brand-l { opacity: 0; }
-  .brand-n { opacity: 1; transform: none; }
-  .brand-ack { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
-  .brand-scratch { opacity: 0; }
+  .brand.play .brand-l,
+  .brand.play .brand-n,
+  .brand.play .brand-ack,
+  .brand.play .brand-scratch,
+  .brand.play .brand-scratch path { animation: none; }
+  .brand .brand-l { opacity: 0; }
+  .brand .brand-n { opacity: 1; transform: none; }
+  .brand .brand-ack { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
+  .brand .brand-scratch { opacity: 0; }
 }
 .search input {
   width: 280px;

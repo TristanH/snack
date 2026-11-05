@@ -1963,6 +1963,7 @@ function bindUi() {
   $('#refresh').addEventListener('click', refreshView);
 
   sizeBrand();
+  bindBrand();
   document.addEventListener('keydown', onKeyDown);
   bindReactions();
   bindEmojiPicker();
@@ -2001,6 +2002,23 @@ function sizeBrand() {
   const shift = widthOf('n') - widthOf('l');
   probe.remove();
   if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
+}
+
+// Runs the brand animation on load, and again on hover. Restarting a CSS
+// animation needs the class taken off, a forced reflow so that removal is
+// actually committed, then the class put back — without the reflow the browser
+// coalesces both changes and nothing happens. Must run after sizeBrand(), which
+// sets the --brand-shift the animation lands on.
+function bindBrand() {
+  const brand = $('.brand');
+  if (!brand) return;
+  const play = () => {
+    brand.classList.remove('play');
+    void brand.offsetWidth;
+    brand.classList.add('play');
+  };
+  play();
+  brand.addEventListener('mouseenter', play);
 }
 
 let uiBound = false;

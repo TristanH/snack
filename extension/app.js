@@ -1946,19 +1946,23 @@ function bindUi() {
   document.addEventListener('visibilitychange', refreshAll);
 }
 
+
 function sizeBrand() {
-  const apply = () => {
-    const swap = $('.brand-swap');
-    const n = $('.brand-n');
-    if (!swap || !n) return;
-    // offsetWidth, not getBoundingClientRect: the n's spring animation starts
-    // at scale(0.75) rotate(8deg), and a client rect reports the *transformed*
-    // box — which measured ~0.7px narrow and crowded the n against the a.
-    const shift = n.offsetWidth - swap.offsetWidth;
-    if (shift > 0) $('.brand').style.setProperty('--brand-shift', `${shift}px`);
+  const brand = $('.brand');
+  if (!brand) return;
+  const style = getComputedStyle(brand);
+  const probe = document.createElement('span');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;white-space:pre';
+  for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) probe.style[prop] = style[prop];
+  document.body.append(probe);
+  const widthOf = (text) => {
+    probe.textContent = text;
+    return probe.getBoundingClientRect().width;
   };
-  apply();
-  document.fonts?.ready.then(apply).catch(() => {});
+  const shift = widthOf('n') - widthOf('l');
+  probe.remove();
+  if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
 }
 
 function setFilter(view, filter) {

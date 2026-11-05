@@ -115,7 +115,7 @@ kbd {
   line-height: 1;
   white-space: nowrap;
   --brand-shift: 0.3em; /* Fallback; app.js replaces it with a measured value. */
-  --brand-nudge: 0.5px; /* Optical breathing room between the n and the a. */
+  --brand-nudge: 0px; /* Optical tweak on top of the measured shift, if needed. */
 }
 
 .brand-swap { position: relative; display: inline-block; line-height: 1; }

@@ -397,6 +397,10 @@ function renderList() {
   $('#list-footer').textContent = view.footer(items.length);
 }
 
+const markUpdated = () => {
+  $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+};
+
 function applyInbox(data) {
   mergeDirectory(data);
   state.inboxItems = data.items;
@@ -422,7 +426,7 @@ async function loadInbox({ full = false } = {}) {
       },
     });
     applyInbox(data);
-    $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    markUpdated();
   } catch (err) {
     if (err instanceof backend.AuthError) return showConnect(err.message);
     $('#status').textContent = `Error: ${err.message}`;
@@ -631,17 +635,21 @@ function channelRowHtml(c) {
     </div>`;
 }
 
-async function loadChannels() {
+// maxAgeMs: passed through to the service's age guard. Omit it for a
+// background pass (15s default, so it doesn't duplicate getInbox's fetch);
+// pass 0 to force, which is what ⇧R and opening the tab do.
+async function loadChannels({ maxAgeMs } = {}) {
   if (state.channelsLoading) return;
   state.channelsLoading = true;
   try {
-    const data = await backend.getChannels();
+    const data = await backend.getChannels({ maxAgeMs });
     mergeDirectory(data);
     state.channelCounts = data.counts;
     state.sections = data.sections || [];
     state.channelItems = data.items;
     state.channelsLoaded = true;
     renderList();
+    markUpdated();
   } catch (err) {
     if (err instanceof backend.AuthError) return showConnect(err.message);
     $('#status').textContent = `Error: ${err.message}`;
@@ -893,6 +901,7 @@ async function loadGregbot({ maxAgeMs = 0 } = {}) {
     state.gregbotCallers = data.callers;
     state.gregbotLoaded = true;
     renderList();
+    markUpdated();
   } catch (err) {
     if (err instanceof backend.AuthError) return showConnect(err.message);
     $('#status').textContent = `Error: ${err.message}`;
@@ -935,7 +944,7 @@ const VIEWS = {
     row: channelRowHtml,
     open: openChannel,
     done: dismissChannel,
-    load: loadChannels,
+    load: () => loadChannels({ maxAgeMs: 0 }),
     isLoaded: () => state.channelsLoaded,
     unread: (item) => !item.read,
     grouped: true,
@@ -979,8 +988,14 @@ function setView(view) {
   if (!currentView().isLoaded()) currentView().load();
 }
 
-function refreshView() {
-  currentView().load();
+async function refreshView() {
+  const btn = $('#refresh');
+  btn.classList.add('spinning');
+  try {
+    await currentView().load();
+  } finally {
+    btn.classList.remove('spinning');
+  }
 }
 
 // ---------------------------------------------------------------------------

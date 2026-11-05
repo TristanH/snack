@@ -144,9 +144,11 @@ export const getMentionables = () =>
   });
 
 // Unread channels/DMs, minus muted and ignored ones.
-export const getChannels = () =>
+// maxAgeMs defaults to 15s so a background pass doesn't re-fetch client.counts
+// that getInbox just fetched. An explicit refresh passes 0 to force it.
+export const getChannels = ({ maxAgeMs = 15_000 } = {}) =>
   withSession(async (s) => {
-    await s.channels.refresh({ maxAgeMs: 15_000 });
+    await s.channels.refresh({ maxAgeMs });
     return s.channels.snapshot();
   });
 

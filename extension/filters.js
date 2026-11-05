@@ -54,14 +54,20 @@ export function attachFilters(input, { facets, chips, onChange }) {
 
   const current = () => chips() || [];
 
+  const facetOf = (chip) => facets().find((f) => f.key === chip?.facet);
+  const isPinned = (chip) => Boolean(facetOf(chip)?.pinned);
+
   function renderChips() {
     chipsEl.innerHTML = current()
-      .map(
-        (c, i) =>
-          `<span class="filter-chip" data-i="${i}" title="${escapeHtml(`${c.facetLabel} ${c.label}`)}"><b>${escapeHtml(
-            c.facetLabel,
-          )}</b><span class="chip-v">${escapeHtml(c.label)}</span><button class="chip-x" data-remove="${i}" aria-label="Remove">×</button></span>`,
-      )
+      .map((c, i) => {
+        const pinned = isPinned(c);
+        const tip = `${c.facetLabel} ${c.label}`;
+        return `<span class="filter-chip${pinned ? ' pinned' : ''}" data-i="${i}" title="${escapeHtml(tip)}"><b>${escapeHtml(
+          c.facetLabel,
+        )}</b><span class="chip-v">${escapeHtml(c.label)}</span>${
+          pinned ? '<span class="chip-caret" aria-hidden="true"></span>' : `<button class="chip-x" data-remove="${i}" aria-label="Remove">×</button>`
+        }</span>`;
+      })
       .join('');
   }
 
@@ -74,13 +80,29 @@ export function attachFilters(input, { facets, chips, onChange }) {
   const addChip = (facet, v) => {
     const f = facets().find((x) => x.key === facet);
     if (current().some((c) => c.facet === facet && c.value === v.value)) return;
+    const chip = { facet, value: v.value, label: v.label, facetLabel: f?.label || facet };
+    // A pinned chip is replaced where it sits, so it keeps its place at the front.
+    if (f?.pinned) {
+      const at = current().findIndex((c) => c.facet === facet);
+      if (at !== -1) return set(current().map((c, i) => (i === at ? chip : c)));
+    }
     // Most facets accept several values and OR them; an exclusive one (an age
     // window, say) replaces whatever it had.
     const kept = f?.exclusive ? current().filter((c) => c.facet !== facet) : current();
-    set([...kept, { facet, value: v.value, label: v.label, facetLabel: f?.label || facet }]);
+    set([...kept, chip]);
   };
 
-  const removeAt = (i) => set(current().filter((_, n) => n !== i));
+  const removeAt = (i) => {
+    if (isPinned(current()[i])) return; // Pinned chips are permanent.
+    set(current().filter((_, n) => n !== i));
+  };
+
+  // Pick the nth value of the pinned facet — what the 1/2/3 shortcuts drive.
+  function selectPinned(index) {
+    const f = facets().find((x) => x.pinned);
+    const v = f?.values[index];
+    if (f && v) addChip(f.key, v);
+  }
 
   function close() {
     open = null;
@@ -105,7 +127,9 @@ export function attachFilters(input, { facets, chips, onChange }) {
   function rows() {
     const q = query();
     if (!open?.facet) {
-      const all = facets().filter((f) => f.values.length);
+      // Pinned facets are already on screen as a chip, so the generic menu
+      // doesn't offer them — you open those by clicking the chip.
+      const all = facets().filter((f) => f.values.length && !f.pinned);
       // Typing matches values across every facet, so you can go straight to a
       // name without picking "Initiated by" first.
       if (q) {
@@ -142,7 +166,9 @@ export function attachFilters(input, { facets, chips, onChange }) {
         }
         const prefix = open.facet ? '' : `<b>${escapeHtml(r.facetLabel)}</b> `;
         return `<button class="filter-row${active}" data-i="${i}">${prefix}${escapeHtml(r.v.label)}${
-          r.v.count ? `<span class="muted">${r.v.count}</span>` : ''
+          // != null, not truthy: a count of 0 is worth showing ("Archived 0"),
+          // but a facet with no counts at all (Within) shouldn't show one.
+          r.v.count != null ? `<span class="muted">${r.v.count}</span>` : ''
         }</button>`;
       })
       .join('');
@@ -188,9 +214,13 @@ export function attachFilters(input, { facets, chips, onChange }) {
   };
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Backspace' && !input.value && current().length) {
-      claim(e);
-      return removeAt(current().length - 1);
+    if (e.key === 'Backspace' && !input.value) {
+      // Removes the last chip you *can* remove, stepping over pinned ones.
+      const back = [...current()].reverse().findIndex((c) => !isPinned(c));
+      if (back !== -1) {
+        claim(e);
+        return removeAt(current().length - 1 - back);
+      }
     }
     // ← / → scroll the chip row once the caret has nowhere left to go, so they
     // still move through typed text normally. Works with the menu open too.
@@ -232,7 +262,15 @@ export function attachFilters(input, { facets, chips, onChange }) {
 
   chipsEl.addEventListener('click', (e) => {
     const x = e.target.closest('[data-remove]');
-    if (x) removeAt(Number(x.dataset.remove));
+    if (x) return removeAt(Number(x.dataset.remove));
+    // Clicking a pinned chip opens its values, so you can switch between them.
+    const chip = e.target.closest('.filter-chip');
+    const c = chip && current()[Number(chip.dataset.i)];
+    if (!c || !isPinned(c)) return;
+    input.value = '';
+    open = { facet: c.facet, results: [], active: 0 };
+    render();
+    input.focus();
   });
 
   document.addEventListener('mousedown', (e) => {
@@ -240,5 +278,5 @@ export function attachFilters(input, { facets, chips, onChange }) {
   });
 
   renderChips();
-  return { renderChips, close, isOpen: () => Boolean(open) && !popup.hidden };
+  return { renderChips, close, selectPinned, isOpen: () => Boolean(open) && !popup.hidden };
 }

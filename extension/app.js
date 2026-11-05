@@ -21,7 +21,6 @@ const state = {
   view: 'inbox', // a key of VIEWS
   inboxItems: [], // threads, DMs and mentions, merged (see lib/inbox.js)
   inboxLoaded: false,
-  filters: { inbox: 'all' }, // the active filter per view (gregbot uses chips)
   channelItems: [],
   mentionItems: [],
   channelCounts: {},
@@ -32,8 +31,12 @@ const state = {
   gregbotCallers: [],
   gregbotLoaded: false,
   gregbotLoading: false,
-  // Faceted filter chips, per view (see filters.js). Gregbot opens on Working.
-  chips: { gregbot: [{ facet: 'status', value: 'working', label: 'Working', facetLabel: 'Status' }] },
+  // Faceted filter chips, per view (see filters.js). Inbox's Show chip is
+  // pinned — always present, never removable. Gregbot opens on Working.
+  chips: {
+    inbox: [{ facet: 'show', value: 'all', label: 'All', facetLabel: 'Show' }],
+    gregbot: [{ facet: 'status', value: 'working', label: 'Working', facetLabel: 'Status' }],
+  },
   sections: [],
   backTo: null, // { key, scrollTop } while viewing a thread opened from a conversation
   detail: null, // { channel, messages: Map<ts, message> } for the open conversation
@@ -255,16 +258,39 @@ function inboxHaystack(item) {
 }
 
 // The active filter in the current view (each view keeps its own).
-const filterOf = (view) => state.filters[view];
 // The active filter chips in a view (see filters.js).
 const chipsOf = (view) => state.chips[view] || [];
+const chipValue = (view, facet) => chipsOf(view).find((c) => c.facet === facet)?.value;
+
+// The Inbox's only facet, and a pinned one: it always has exactly one value,
+// so it reads as a permanent chip you click to switch rather than a chip you
+// add and remove.
+function inboxFacets() {
+  const items = state.inboxItems;
+  const archived = items.filter(isArchived).length;
+  return [
+    {
+      key: 'show',
+      label: 'Show',
+      pinned: true,
+      exclusive: true,
+      values: [
+        { value: 'all', label: 'All', count: items.length - archived },
+        { value: 'unread', label: 'Unread', count: items.filter((i) => i.unread && !isArchived(i)).length },
+        { value: 'archived', label: 'Archived', count: archived },
+      ],
+    },
+  ];
+}
+
+const inboxShow = () => chipValue('inbox', 'show') || 'all';
 
 function visibleInbox() {
   const q = state.query.trim().toLowerCase();
-  const filter = filterOf('inbox');
+  const show = inboxShow();
   return state.inboxItems.filter((item) => {
-    if (filter === 'archived' ? !isArchived(item) : isArchived(item)) return false;
-    if (filter === 'unread' && !item.unread) return false;
+    if (show === 'archived' ? !isArchived(item) : isArchived(item)) return false;
+    if (show === 'unread' && !item.unread) return false;
     return !q || inboxHaystack(item).includes(q);
   });
 }
@@ -362,7 +388,6 @@ function renderList() {
   }
 
   const unread = state.inboxItems.filter((i) => i.unread && !isArchived(i)).length;
-  $('#unread-count').textContent = unread ? `(${unread})` : '';
   $('#inbox-count').textContent = unread ? `(${unread})` : '';
   $('#channels-count').textContent = state.channelCounts.unread ? `(${state.channelCounts.unread})` : '';
   const working = state.gregbotCounts.working || 0;
@@ -902,7 +927,7 @@ const VIEWS = {
     isLoaded: () => state.inboxLoaded,
     unread: (item) => item.unread,
     grouped: false,
-    empty: () => ({ all: 'Inbox zero 🎉', unread: 'Nothing unread.', archived: 'Nothing archived.' })[filterOf('inbox')],
+    empty: () => ({ all: 'Inbox zero 🎉', unread: 'Nothing unread.', archived: 'Nothing archived.' })[inboxShow()],
     footer: (n) => `${n} ${n === 1 ? 'item' : 'items'}`,
   },
   channels: {
@@ -946,7 +971,6 @@ function setView(view) {
   state.selectedKey = null;
   closeThread();
   document.querySelectorAll('.views button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  document.querySelectorAll('.filters').forEach((f) => (f.hidden = f.dataset.view !== view));
   $('#search').placeholder = `Filter ${view}`;
   $('.list-pane').scrollTop = 0;
   filterUi?.close();
@@ -1725,9 +1749,9 @@ const SHORTCUTS = {
   channels: { group: 'Lists', label: 'Channels', show: ['C'], keys: ['c'], run: () => setView('channels') },
   gregbot: { group: 'Lists', label: 'Gregbot', show: ['G'], keys: ['g'], run: () => setView('gregbot') },
   toggleView: { group: 'Lists', label: 'Next list', show: ['`'], keys: ['`'], run: () => cycleView() },
-  filter1: { group: 'Lists', label: 'Inbox: all', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
-  filter2: { group: 'Lists', label: 'Inbox: unread', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
-  filter3: { group: 'Lists', label: 'Inbox: archived', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
+  filter1: { group: 'Lists', label: 'Show all', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
+  filter2: { group: 'Lists', label: 'Show unread', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
+  filter3: { group: 'Lists', label: 'Show archived', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
   search: { group: 'Lists', label: 'Filter list', show: ['/'], keys: ['/'], run: () => $('#search').focus() },
   refresh: { group: 'Lists', label: 'Refresh', show: ['⇧', 'R'], keys: ['Shift+R'], run: () => refreshView() },
 
@@ -1782,8 +1806,10 @@ function cycleView() {
   setView(order[(order.indexOf(state.view) + 1) % order.length]);
 }
 
+// 1/2/3 pick the nth value of the current view's pinned facet (the Inbox's
+// Show chip); a no-op in a view that hasn't got one.
 function pickFilter(i) {
-  document.querySelector('.filters:not([hidden])')?.querySelectorAll('button')[i]?.click();
+  filterUi?.selectPinned(i);
 }
 
 function scrollDetail(direction) {
@@ -1908,7 +1934,7 @@ function bindUi() {
   });
   // Faceted chips live in the same box; a view with no facets is unaffected.
   filterUi = attachFilters($('#search'), {
-    facets: () => (state.view === 'gregbot' ? gregbotFacets() : []),
+    facets: () => ({ inbox: inboxFacets, gregbot: gregbotFacets }[state.view]?.() || []),
     chips: () => chipsOf(state.view),
     onChange: (next) => {
       const before = gregbotDays();
@@ -1919,9 +1945,6 @@ function bindUi() {
     },
   });
   document.querySelectorAll('.views button').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
-  document.querySelectorAll('.filters button').forEach((btn) =>
-    btn.addEventListener('click', () => setFilter(btn.closest('.filters').dataset.view, btn.dataset.filter)),
-  );
   $('#refresh').addEventListener('click', refreshView);
 
   sizeBrand();
@@ -1963,14 +1986,6 @@ function sizeBrand() {
   const shift = widthOf('n') - widthOf('l');
   probe.remove();
   if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
-}
-
-function setFilter(view, filter) {
-  state.filters[view] = filter;
-  document
-    .querySelectorAll(`.filters[data-view="${view}"] button`)
-    .forEach((b) => b.classList.toggle('active', b.dataset.filter === filter));
-  renderList();
 }
 
 let uiBound = false;

@@ -351,6 +351,9 @@ kbd {
 }
 .filter-chip b { color: var(--muted); font-weight: 600; flex: none; }
 .filter-chip .chip-v { overflow: hidden; text-overflow: ellipsis; }
+.filter-chip.pinned { padding-right: 5px; cursor: pointer; }
+.filter-chip.pinned:hover { background: var(--border); }
+.filter-chip .chip-caret { color: var(--muted); font-size: 9px; line-height: 1; }
 .filter-chip .chip-x {
   border: 0;
   background: none;

@@ -4,6 +4,7 @@
 import * as backend from './backend.js';
 import { emojiChar, emojiHtml, searchEmoji, setCustomEmoji } from './emoji.js';
 import { attachAutocomplete } from './autocomplete.js';
+import { attachFilters } from './filters.js';
 import { messageTexts } from './lib/threads.js';
 
 const DEFAULT_RECENT_EMOJI = ['+1', 'eyes', 'white_check_mark', 'heart', 'joy', 'tada', 'pray', 'raised_hands', 'fire', '100'];
@@ -20,7 +21,7 @@ const state = {
   view: 'inbox', // a key of VIEWS
   inboxItems: [], // threads, DMs and mentions, merged (see lib/inbox.js)
   inboxLoaded: false,
-  filters: { inbox: 'all', gregbot: 'working' }, // the active filter per view
+  filters: { inbox: 'all' }, // the active filter per view (gregbot uses chips)
   channelItems: [],
   mentionItems: [],
   channelCounts: {},
@@ -28,8 +29,11 @@ const state = {
   channelsLoading: false,
   gregbotItems: [], // threads gregbot is working in (see lib/gregbot.js)
   gregbotCounts: {},
+  gregbotCallers: [],
   gregbotLoaded: false,
   gregbotLoading: false,
+  // Faceted filter chips, per view (see filters.js). Gregbot opens on Working.
+  chips: { gregbot: [{ facet: 'status', value: 'working', label: 'Working', facetLabel: 'Status' }] },
   sections: [],
   backTo: null, // { key, scrollTop } while viewing a thread opened from a conversation
   detail: null, // { channel, messages: Map<ts, message> } for the open conversation
@@ -46,6 +50,7 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 const EMPTY_DETAIL = $('#detail').innerHTML;
+let filterUi = null; // The faceted filter box, once bound (see filters.js).
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -250,7 +255,9 @@ function inboxHaystack(item) {
 }
 
 // The active filter in the current view (each view keeps its own).
-const filterOf = (view = state.view) => state.filters[view];
+const filterOf = (view) => state.filters[view];
+// The active filter chips in a view (see filters.js).
+const chipsOf = (view) => state.chips[view] || [];
 
 function visibleInbox() {
   const q = state.query.trim().toLowerCase();
@@ -731,15 +738,88 @@ function sinceText(ts) {
   return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
+// Facets for the filter box, with a count per value. Counts are over
+// everything loaded, not what's currently filtered, so they don't shift as you
+// narrow. Empty value lists are dropped so the menu never offers a dead end.
+function gregbotFacets() {
+  const items = state.gregbotItems;
+  const tally = (valuesOf) => {
+    const counts = new Map();
+    for (const t of items) for (const v of valuesOf(t)) counts.set(v, (counts.get(v) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  const countOf = (test) => items.filter(test).length;
+  const some = (values) => values.filter((v) => v.count);
+
+  return [
+    { key: 'by', label: 'Initiated by', values: tally((t) => t.callers).map(([id, count]) => ({ value: id, label: userName(id), count })) },
+    { key: 'in', label: 'In', values: tally((t) => [t.channel]).map(([id, count]) => ({ value: id, label: channelLabel(id), count })) },
+    {
+      key: 'status',
+      label: 'Status',
+      // Complementary, so OR-ing both would just mean "everything".
+      exclusive: true,
+      values: some([
+        { value: 'working', label: 'Working', count: countOf((t) => t.working) },
+        { value: 'done', label: 'Done', count: countOf((t) => !t.working) },
+      ]),
+    },
+    {
+      key: 'is',
+      label: 'Is',
+      values: some([
+        { value: 'blocked', label: 'Blocked on approval', count: countOf((t) => t.blocked) },
+        { value: 'quiet', label: 'Quiet — maybe stuck', count: countOf(isStale) },
+      ]),
+    },
+    {
+      key: 'has',
+      label: 'Has',
+      values: some([
+        { value: 'pr', label: 'A PR', count: countOf((t) => t.did?.pr) },
+        { value: 'linear', label: 'A Linear ticket', count: countOf((t) => t.did?.linear) },
+        { value: 'error', label: 'Hit an error', count: countOf((t) => t.did?.error) },
+      ]),
+    },
+    // Changes how far back we fetch, so only one at a time.
+    { key: 'age', label: 'Within', exclusive: true, values: [{ value: '3d', label: '3 days' }, { value: '7d', label: '7 days' }] },
+  ];
+}
+
+const CHIP_MATCH = {
+  by: (t, v) => t.callers.includes(v),
+  in: (t, v) => t.channel === v,
+  status: (t, v) => (v === 'working' ? t.working : !t.working),
+  is: (t, v) => (v === 'blocked' ? Boolean(t.blocked) : isStale(t)),
+  has: (t, v) => Boolean(t.did?.[v]),
+  age: (t, v) => Number(t.lastTs) >= Date.now() / 1000 - parseInt(v, 10) * 86400,
+};
+
+// Several values of one facet are OR'd (a thread both artem and tristan called
+// shows under either); different facets are AND'd.
+function matchesChips(item, chips) {
+  const byFacet = new Map();
+  for (const c of chips) byFacet.set(c.facet, [...(byFacet.get(c.facet) || []), c.value]);
+  for (const [facet, values] of byFacet) {
+    const test = CHIP_MATCH[facet];
+    if (test && !values.some((v) => test(item, v))) return false;
+  }
+  return true;
+}
+
+// How far back to fetch; the Within chip decides.
+const gregbotDays = () => parseInt(chipsOf('gregbot').find((c) => c.facet === 'age')?.value || '', 10) || 3;
+
 function visibleGregbot() {
   const q = state.query.trim().toLowerCase();
-  const filter = filterOf('gregbot');
-  const cutoff = Date.now() / 1000 - 3 * 86400;
+  const chips = chipsOf('gregbot');
   return state.gregbotItems.filter((t) => {
-    if (filter === 'working' && !t.working) return false;
-    if (filter === '3d' && Number(t.lastTs) < cutoff) return false;
+    if (!matchesChips(t, chips)) return false;
     if (!q) return true;
-    return [channelLabel(t.channel), t.step, ...messageTexts(t.last).map(plain)].join(' ').toLowerCase().includes(q);
+    return [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), ...messageTexts(t.last).map(plain)]
+      .join(' ')
+      .toLowerCase()
+      .includes(q);
   });
 }
 
@@ -747,16 +827,21 @@ function gregbotRowHtml(t) {
   const status = t.working
     ? `<span class="type-pill working">Working${t.minutes ? ` · ${t.minutes}m` : ''}</span>`
     : '<span class="type-pill done">Done</span>';
-  // Mid-task, what it's doing right now beats the whole message.
+  // Everyone who called gregbot here, not just whoever started the thread.
+  const who = t.callers.map(userName).join(', ');
+  // The instruction is the ticket; gregbot's own latest line is the progress.
+  const ask = t.ask ? plain(t.ask) : '';
   const preview = (t.working && t.step) || messagePreview(t.last);
   return `
     <span class="dot"></span>
     <div class="row">
       ${status}
-      <span class="channel">${escapeHtml(channelLabel(t.channel))}</span>
+      ${t.blocked ? '<span class="type-pill blocked">Needs approval</span>' : ''}
+      <span class="channel">${escapeHtml(channelLabel(t.channel))}${who ? ` · ${escapeHtml(who)}` : ''}</span>
       <span class="time" title="${escapeHtml(fullTime(t.lastTs))}">${escapeHtml(relativeTime(t.lastTs))}</span>
     </div>
-    <div class="row root"><span>${escapeHtml(preview)}</span></div>
+    ${ask ? `<div class="row root"><span>${escapeHtml(ask)}</span></div>` : ''}
+    <div class="row latest"><span>${escapeHtml(preview)}</span></div>
     <div class="row meta">
       <span>${t.count} ${t.count === 1 ? 'update' : 'updates'}${
         isStale(t) ? ` · <span class="tag todo">quiet ${escapeHtml(sinceText(t.lastTs))}</span>` : ''
@@ -769,15 +854,19 @@ function gregbotRowHtml(t) {
     </div>`;
 }
 
-async function loadGregbot() {
+// maxAgeMs: skip if refreshed that recently. A refresh is two paged searches
+// and search.messages is rate-limited tightly, so the periodic one passes a
+// couple of minutes; opening the view or pressing ⇧R forces it.
+async function loadGregbot({ maxAgeMs = 0 } = {}) {
   if (state.gregbotLoading) return;
   state.gregbotLoading = true;
   try {
-    // Always the full window; the 3d filter then costs nothing.
-    const data = await backend.getGregbot();
+    // A skipped refresh still returns a snapshot, just of unchanged data.
+    const data = await backend.getGregbot({ days: gregbotDays(), maxAgeMs });
     mergeDirectory(data);
     state.gregbotItems = data.items;
     state.gregbotCounts = data.counts;
+    state.gregbotCallers = data.callers;
     state.gregbotLoaded = true;
     renderList();
   } catch (err) {
@@ -837,13 +926,16 @@ const VIEWS = {
     row: gregbotRowHtml,
     open: openGregbotThread,
     done: null, // Nothing to archive: the list is simply what gregbot is doing.
-    load: loadGregbot,
+    load: () => loadGregbot(),
     isLoaded: () => state.gregbotLoaded,
     unread: (item) => item.working, // Live tickets get the dot.
     grouped: false,
-    empty: () => (filterOf('gregbot') === 'working' ? 'gregbot isn’t working on anything.' : 'No gregbot threads in this window.'),
-    footer: (n) =>
-      `${n} ${n === 1 ? 'thread' : 'threads'}${state.gregbotCounts.working ? ` · ${state.gregbotCounts.working} in progress` : ''}`,
+    empty: () => (chipsOf('gregbot').length ? 'Nothing matches these filters.' : 'No gregbot threads in this window.'),
+    footer: (n) => {
+      const { working = 0, blocked = 0 } = state.gregbotCounts;
+      const parts = [working && `${working} in progress`, blocked && `${blocked} awaiting approval`].filter(Boolean);
+      return `${n} ${n === 1 ? 'thread' : 'threads'}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+    },
   },
 };
 
@@ -858,6 +950,9 @@ function setView(view) {
   document.querySelectorAll('.filters').forEach((f) => (f.hidden = f.dataset.view !== view));
   $('#search').placeholder = `Filter ${view}`;
   $('.list-pane').scrollTop = 0;
+  filterUi?.close();
+  filterUi?.renderChips(); // Chips are per view.
+  syncFilterButtons();
   renderList();
   if (!currentView().isLoaded()) currentView().load();
 }
@@ -1813,6 +1908,20 @@ function bindUi() {
     state.query = e.target.value;
     renderList();
   });
+  // Faceted chips live in the same box; a view with no facets is unaffected.
+  filterUi = attachFilters($('#search'), {
+    facets: () => (state.view === 'gregbot' ? gregbotFacets() : []),
+    chips: () => chipsOf(state.view),
+    onChange: (next) => {
+      const before = gregbotDays();
+      state.chips[state.view] = next;
+      syncFilterButtons();
+      renderList();
+      // A wider Within window needs a deeper fetch.
+      if (state.view === 'gregbot' && gregbotDays() !== before) loadGregbot();
+    },
+  });
+  syncFilterButtons(); // Highlight whatever state.chips starts with.
   document.querySelectorAll('.views button').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
   document.querySelectorAll('.filters button').forEach((btn) =>
     btn.addEventListener('click', () => setFilter(btn.closest('.filters').dataset.view, btn.dataset.filter)),
@@ -1834,13 +1943,32 @@ function bindUi() {
     if (document.visibilityState !== 'visible') return;
     loadInbox();
     loadChannels();
-    loadGregbot();
+    loadGregbot({ maxAgeMs: 120_000 }); // Paged search; don't hammer it every minute.
   };
   setInterval(refreshAll, REFRESH_MS);
   document.addEventListener('visibilitychange', refreshAll);
 }
 
+// Gregbot's filter buttons are shortcuts for chips, so there's one filter
+// model rather than two competing ones. They toggle rather than act as a radio
+// group, and Status and Within are different facets, so Working + 3 days can
+// both be on.
+const GREGBOT_BUTTON_CHIPS = { working: ['status', 'working'], '3d': ['age', '3d'], '7d': ['age', '7d'] };
+
+function syncFilterButtons() {
+  const chips = chipsOf('gregbot');
+  document.querySelectorAll('.filters[data-view="gregbot"] button').forEach((b) => {
+    const [facet, value] = GREGBOT_BUTTON_CHIPS[b.dataset.filter] || [];
+    b.classList.toggle('active', chips.some((c) => c.facet === facet && c.value === value));
+  });
+}
+
 function setFilter(view, filter) {
+  if (view === 'gregbot') {
+    const [facet, value] = GREGBOT_BUTTON_CHIPS[filter] || [];
+    if (facet) filterUi?.toggle(facet, value); // onChange re-renders and syncs.
+    return;
+  }
   state.filters[view] = filter;
   document
     .querySelectorAll(`.filters[data-view="${view}"] button`)

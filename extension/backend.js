@@ -190,9 +190,9 @@ export const getInbox = ({ full = false, onUpdate } = {}) =>
 export const getConversation = (channel, lastRead) => withSession((s) => s.dms.conversation(channel, lastRead));
 
 // Threads gregbot is working in, newest activity first (see lib/gregbot.js).
-export const getGregbot = ({ days } = {}) =>
+export const getGregbot = ({ days, maxAgeMs } = {}) =>
   withSession(async (s) => {
-    await s.gregbot.refresh({ days });
+    await s.gregbot.refresh({ days, maxAgeMs });
     return s.gregbot.snapshot();
   });
 

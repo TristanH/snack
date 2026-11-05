@@ -178,6 +178,107 @@ kbd {
 .type-pill.mention { color: var(--mention); background: var(--mention-bg); }
 .type-pill.working { color: var(--dm); background: var(--dm-bg); }
 .type-pill.done { color: var(--muted); background: var(--surface-2); }
+.type-pill.blocked { color: var(--mention); background: var(--mention-bg); }
+
+/* Faceted filter box (filters.js): chips sit inline before the input, and the
+   facet menu hangs below the whole box. */
+/* The box now carries the border that the bare input used to, so chips sit
+   inside it. Selectors are .search-prefixed to outrank the responsive
+   `.search input` rule further down. */
+/* Chips and the input sit on one line that scrolls sideways, so the box keeps
+   its height however many chips you add. Nothing here may set `overflow`: this
+   is the popup's positioned ancestor and would clip the menu — the inner
+   .filter-scroll owns the overflow instead. */
+.search .filter-box {
+  position: relative;
+  min-width: 240px;
+  max-width: 46vw;
+  padding: 3px 5px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.search .filter-box:focus-within { border-color: var(--accent); }
+.filter-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain; /* Don't trigger browser back-swipe. */
+}
+.filter-scroll::-webkit-scrollbar { display: none; }
+/* The box carries the border, so the input inside is bare — no nested box, no
+   second focus ring. */
+.search .filter-box input {
+  flex: 1 0 110px; /* Grows when there's room, never shrinks away. */
+  width: auto;
+  max-width: none;
+  border: 0;
+  background: none;
+  padding: 3px 4px;
+}
+.search .filter-box input:focus { outline: none; }
+.filter-chips { display: flex; gap: 4px; flex: none; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none; /* Never squash into the neighbouring chip. */
+  min-width: 0;
+  max-width: 240px;
+  padding: 1px 2px 1px 7px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.filter-chip b { color: var(--accent); font-weight: 600; flex: none; }
+.filter-chip .chip-v { overflow: hidden; text-overflow: ellipsis; }
+.filter-chip .chip-x {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.filter-chip .chip-x:hover { color: var(--danger); }
+.filter-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  text-align: left;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-row b { font-weight: 600; color: var(--accent); }
+.filter-row .muted { margin-left: auto; font-size: 12px; }
+.filter-row.active, .filter-row:hover { background: var(--selected); }
 .tag { font-size: 11px; font-weight: 600; border-radius: 4px; padding: 0 5px; }
 .tag.replied { color: var(--muted); border: 1px solid var(--border); }
 .tag.todo { color: var(--mention); background: var(--mention-bg); }

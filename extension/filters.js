@@ -77,19 +77,24 @@ export function attachFilters(input, { facets, chips, onChange }) {
     scrollToInput(); // Keep the caret in view after the row changes width.
   }
 
-  const addChip = (facet, v) => {
-    const f = facets().find((x) => x.key === facet);
-    if (current().some((c) => c.facet === facet && c.value === v.value)) return;
-    const chip = { facet, value: v.value, label: v.label, facetLabel: f?.label || facet };
+  function withChip(list, facetKey, v) {
+    const f = facets().find((x) => x.key === facetKey);
+    if (list.some((c) => c.facet === facetKey && c.value === v.value)) return list;
+    const chip = { facet: facetKey, value: v.value, label: v.label, facetLabel: f?.label || facetKey };
     // A pinned chip is replaced where it sits, so it keeps its place at the front.
     if (f?.pinned) {
-      const at = current().findIndex((c) => c.facet === facet);
-      if (at !== -1) return set(current().map((c, i) => (i === at ? chip : c)));
+      const at = list.findIndex((c) => c.facet === facetKey);
+      if (at !== -1) return list.map((c, i) => (i === at ? chip : c));
     }
     // Most facets accept several values and OR them; an exclusive one (an age
     // window, say) replaces whatever it had.
-    const kept = f?.exclusive ? current().filter((c) => c.facet !== facet) : current();
-    set([...kept, chip]);
+    const kept = f?.exclusive ? list.filter((c) => c.facet !== facetKey) : list;
+    return [...kept, chip];
+  }
+
+  const addChip = (facetKey, v) => {
+    const next = withChip(current(), facetKey, v);
+    if (next !== current()) set(next);
   };
 
   const removeAt = (i) => {
@@ -102,6 +107,96 @@ export function attachFilters(input, { facets, chips, onChange }) {
     const f = facets().find((x) => x.pinned);
     const v = f?.values[index];
     if (f && v) addChip(f.key, v);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pasted / typed queries: "in: dev-help, bookwise-nits  initiated by: artem"
+  // becomes chips. Handy for handing someone a filter they can paste in.
+
+  const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hasQuerySyntax = (text) => /\S\s*:/.test(text);
+
+  function bestValue(facet, token) {
+    if (!facet) return null;
+    const q = token.toLowerCase().replace(/^[@#]/, '');
+    if (!q) return null;
+    const exact = facet.values.find((v) => String(v.value).toLowerCase() === q);
+    if (exact) return exact;
+    let best = null;
+    let bestRank = Infinity;
+    for (const v of facet.values) {
+      const r = rank(v.label, q);
+      if (r >= 0 && r < bestRank) {
+        best = v;
+        bestRank = r;
+      }
+    }
+    return best;
+  }
+
+  function takeValues(facet, raw) {
+    const picked = [];
+    const leftover = [];
+    for (const chunk of raw.split(',').map((c) => c.trim()).filter(Boolean)) {
+      const words = chunk.split(/\s+/);
+      let hit = null;
+      let used = 0;
+      for (let n = words.length; n >= 1; n--) {
+        const v = bestValue(facet, words.slice(0, n).join(' '));
+        if (v) {
+          hit = v;
+          used = n;
+          break;
+        }
+      }
+      if (!hit) leftover.push(chunk);
+      else {
+        picked.push(hit);
+        if (used < words.length) leftover.push(words.slice(used).join(' '));
+      }
+    }
+    return { picked, leftover };
+  }
+
+  function parseQuery(text) {
+    const all = facets();
+    if (!all.length) return { chips: [], rest: text };
+    // Longest name first, so "initiated by:" wins over "in:".
+    const names = all
+      .flatMap((f) => [f.label, f.key])
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    const re = new RegExp(`(^|\\s)(${names.map(escapeRegExp).join('|')})\\s*:\\s*`, 'gi');
+
+    const marks = [];
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      marks.push({ at: m.index + m[1].length, end: re.lastIndex, name: m[2] });
+    }
+    if (!marks.length) return { chips: [], rest: text };
+
+    const chips = [];
+    const rest = [text.slice(0, marks[0].at).trim()];
+    marks.forEach((mark, i) => {
+      const raw = text.slice(mark.end, i + 1 < marks.length ? marks[i + 1].at : text.length);
+      const facet = all.find((f) => [f.label, f.key].some((n) => n && n.toLowerCase() === mark.name.toLowerCase()));
+      const { picked, leftover } = takeValues(facet, raw);
+      for (const v of picked) chips.push({ facet: facet.key, value: v });
+      // Nothing matched, so show it back rather than silently eating it.
+      if (leftover.length) rest.push(picked.length ? leftover.join(' ') : `${mark.name}: ${leftover.join(', ')}`);
+    });
+    return { chips, rest: rest.filter(Boolean).join(' ').trim() };
+  }
+
+  // Returns true if it recognised anything.
+  function applyQuery(text) {
+    const { chips: parsed, rest } = parseQuery(text);
+    if (!parsed.length) return false;
+    let next = current();
+    for (const { facet, value } of parsed) next = withChip(next, facet, value);
+    input.value = rest;
+    close();
+    set(next);
+    return true;
   }
 
   function close() {
@@ -197,6 +292,19 @@ export function attachFilters(input, { facets, chips, onChange }) {
     render();
   }
 
+  input.addEventListener('paste', (e) => {
+    const pasted = e.clipboardData?.getData('text') || '';
+    if (!hasQuerySyntax(pasted)) return; // Ordinary text: let the browser paste it.
+    const head = input.value.slice(0, input.selectionStart ?? input.value.length);
+    const tail = input.value.slice(input.selectionEnd ?? input.value.length);
+    e.preventDefault();
+    const merged = `${head}${pasted}${tail}`;
+    if (!applyQuery(merged)) {
+      input.value = merged; // Nothing recognised — behave like a normal paste.
+      show();
+    }
+  });
+
   input.addEventListener('focus', show);
   input.addEventListener('click', show);
   input.addEventListener('input', () => {
@@ -233,6 +341,10 @@ export function attachFilters(input, { facets, chips, onChange }) {
         scroll.scrollBy({ left: left ? -SCROLL_STEP : SCROLL_STEP, behavior: 'smooth' });
         return;
       }
+    }
+    if (e.key === 'Enter' && hasQuerySyntax(input.value)) {
+      claim(e);
+      if (applyQuery(input.value)) return;
     }
     if (!open || popup.hidden) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -278,5 +390,5 @@ export function attachFilters(input, { facets, chips, onChange }) {
   });
 
   renderChips();
-  return { renderChips, close, selectPinned, isOpen: () => Boolean(open) && !popup.hidden };
+  return { renderChips, close, selectPinned, applyQuery, isOpen: () => Boolean(open) && !popup.hidden };
 }

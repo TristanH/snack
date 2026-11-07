@@ -178,7 +178,9 @@ export const cachedInbox = () => withSession((s) => inboxSnapshot(s));
 export const getInbox = ({ full = false, onUpdate } = {}) =>
   withSession(async (s) => {
     const others = Promise.all([
-      s.mentions.refresh(),
+      // Four paged search.messages calls, so a background pass holds off for
+      // 45s. An explicit refresh (full) always goes.
+      s.mentions.refresh({ maxAgeMs: full ? 0 : 45_000 }),
       s.channels.refresh({ maxAgeMs: 15_000 }).then(() => s.dms.refresh(s.channels.counts, s.channels.everyMessageChannels())),
     ]);
     await s.threads.refresh({

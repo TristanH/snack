@@ -17,6 +17,7 @@ export class MentionService {
     this.userId = userId;
     this.mentions = new Map();
     this.inflight = null;
+    this.fetchedAt = 0;
   }
 
   async #search(query, pages) {
@@ -29,8 +30,12 @@ export class MentionService {
     return matches;
   }
 
-  refresh() {
+  // maxAgeMs: skip if refreshed that recently. This is four search.messages
+  // requests, and it used to run on every visibilitychange — so tabbing to
+  // DevTools and back burned the search budget on its own.
+  refresh({ maxAgeMs = 0 } = {}) {
     if (this.inflight) return this.inflight;
+    if (Date.now() - this.fetchedAt < maxAgeMs) return Promise.resolve();
     this.inflight = (async () => {
       const me = this.userId;
       const [mentions, mine] = await Promise.all([this.#search(`<@${me}>`, PAGES), this.#search(`from:<@${me}>`, PAGES)]);
@@ -64,6 +69,7 @@ export class MentionService {
         });
       }
       this.mentions = next;
+      this.fetchedAt = Date.now();
     })().finally(() => {
       this.inflight = null;
     });

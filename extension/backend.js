@@ -7,6 +7,7 @@ import { ThreadService } from './lib/threads.js';
 import { ChannelService } from './lib/channels.js';
 import { MentionService } from './lib/mentions.js';
 import { DmService } from './lib/dms.js';
+import { GregbotService } from './lib/gregbot.js';
 import { mergeInbox } from './lib/inbox.js';
 import * as platform from './platform.js';
 
@@ -25,8 +26,9 @@ async function open(team) {
   const channels = new ChannelService(slack, directory);
   const mentions = new MentionService(slack, directory, auth.user_id);
   const dms = new DmService(slack, directory, auth.user_id);
-  await Promise.all([directory.load(), threads.load()]);
-  return { slack, directory, threads, channels, mentions, dms, auth };
+  const gregbot = new GregbotService(slack, directory);
+  await Promise.all([directory.load(), threads.load(), gregbot.load()]);
+  return { slack, directory, threads, channels, mentions, dms, gregbot, auth };
 }
 
 // The saved token goes stale when Slack rotates it; in that case load Slack
@@ -142,9 +144,9 @@ export const getMentionables = () =>
   });
 
 // Unread channels/DMs, minus muted and ignored ones.
-export const getChannels = () =>
+export const getChannels = ({ maxAgeMs = 15_000 } = {}) =>
   withSession(async (s) => {
-    await s.channels.refresh({ maxAgeMs: 15_000 });
+    await s.channels.refresh({ maxAgeMs });
     return s.channels.snapshot();
   });
 
@@ -174,7 +176,9 @@ export const cachedInbox = () => withSession((s) => inboxSnapshot(s));
 export const getInbox = ({ full = false, onUpdate } = {}) =>
   withSession(async (s) => {
     const others = Promise.all([
-      s.mentions.refresh(),
+      // Four paged search.messages calls, so a background pass holds off for
+      // 45s. An explicit refresh (full) always goes.
+      s.mentions.refresh({ maxAgeMs: full ? 0 : 45_000 }),
       s.channels.refresh({ maxAgeMs: 15_000 }).then(() => s.dms.refresh(s.channels.counts, s.channels.everyMessageChannels())),
     ]);
     await s.threads.refresh({
@@ -186,6 +190,16 @@ export const getInbox = ({ full = false, onUpdate } = {}) =>
   });
 
 export const getConversation = (channel, lastRead) => withSession((s) => s.dms.conversation(channel, lastRead));
+
+// Whatever the service holds right now, without fetching.
+export const gregbotSnapshot = () => withSession((s) => s.gregbot.snapshot());
+
+// Threads gregbot is working in, newest activity first (see lib/gregbot.js).
+export const getGregbot = ({ days, maxAgeMs } = {}) =>
+  withSession(async (s) => {
+    await s.gregbot.refresh({ days, maxAgeMs });
+    return s.gregbot.snapshot();
+  });
 
 // Mentions. Seen state comes from Slack's read positions (client.counts for
 // channels, the thread inbox for threads).
@@ -236,9 +250,42 @@ export async function updateArchived(changes) {
 }
 
 // Dev helpers, from DevTools on the Snack page:
-//   await snack.call('subscriptions.thread.getView', { limit: 2 })
-//   await snack.reloadExtension()   // pick up background/content script changes
 globalThis.snack = {
   call: (method, params) => withSession((s) => s.slack.call(method, params)),
+  // The gregbot service's actual state — what's cached, how far back it claims
+  // to cover, and whether a fetch is running.
+  gregbot: () =>
+    withSession((s) => {
+      const g = s.gregbot;
+      const ts = (t) => (t ? new Date(Number(t) * 1000).toLocaleString() : null);
+      const ages = [...g.threads.values()].map((t) => Number(t.lastTs)).sort((a, b) => a - b);
+      return {
+        cachedThreads: g.threads.size,
+        oldest: ts(ages[0]),
+        newest: ts(ages[ages.length - 1]),
+        coveredDays: g.coveredDays, // 0 = nothing, null = all-time
+        windowNow: g.days,
+        syncedTo: ts(g.syncedTo),
+        lastFetch: g.fetchedAt ? new Date(g.fetchedAt).toLocaleString() : null,
+        fetching: Boolean(g.inflight),
+        fetchingWindow: g.inflightDays,
+      };
+    }),
+  // What's actually being sent, and how much of it Slack bounced. Useful when
+  // something is rate limited and it isn't obvious which caller is to blame.
+  stats: (windowMs = 60_000) =>
+    withSession((s) => {
+      const since = Date.now() - windowMs;
+      const recent = s.slack.recent.filter((r) => r.at >= since);
+      const byMethod = {};
+      for (const r of recent) byMethod[r.method] = (byMethod[r.method] || 0) + 1;
+      return {
+        window: `${Math.round(windowMs / 1000)}s`,
+        total: recent.length,
+        searches: recent.filter((r) => r.method === 'search.messages').length,
+        rateLimitedSinceLoad: s.slack.throttled,
+        byMethod: Object.fromEntries(Object.entries(byMethod).sort((a, b) => b[1] - a[1])),
+      };
+    }),
   reloadExtension: () => platform.rpc('dev.reload'),
 };

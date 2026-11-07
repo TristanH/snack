@@ -22,6 +22,10 @@ export class SlackClient {
     this.concurrency = concurrency;
     this.active = 0;
     this.queue = [];
+    // Rolling log of recent calls, for `await snack.stats()` when something is
+    // being rate limited and it isn't obvious what's spending the budget.
+    this.recent = [];
+    this.throttled = 0;
   }
 
   call(method, params = {}) {
@@ -51,8 +55,12 @@ export class SlackClient {
       body[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
     }
 
+    this.recent.push({ method, at: Date.now() });
+    if (this.recent.length > 400) this.recent.splice(0, this.recent.length - 400);
+
     const res = await this.transport(`${this.baseUrl}api/${method}`, body);
 
+    if (res.status === 429) this.throttled++;
     if (res.status === 429 && attempt < 5) {
       const wait = Number(res.retryAfter) || 2 ** attempt;
       console.warn(`[slack] rate limited on ${method}, retrying in ${wait}s`);

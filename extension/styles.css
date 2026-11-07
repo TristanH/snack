@@ -3,6 +3,7 @@
   --surface: #ffffff;
   --surface-2: #f0f0ed;
   --border: #e4e4e0;
+  --border-strong: #cfcec9; /* A touch firmer than --border, for focus. Never heavier than this. */
   --text: #1d1c1d;
   --muted: #6b6a6b;
   --accent: #2f6fde;
@@ -28,6 +29,7 @@
     --surface: #1e1f22;
     --surface-2: #26272b;
     --border: #2f3035;
+    --border-strong: #3e4046;
     --text: #e8e8e6;
     --muted: #9a9a9f;
     --accent: #6ea1ff;
@@ -94,14 +96,125 @@ kbd {
 /* ---------- Shell ---------- */
 .app { height: 100%; display: flex; flex-direction: column; }
 .topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) 1fr;
+  align-items: stretch;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.brand { font-weight: 800; letter-spacing: -0.02em; font-size: 16px; }
+.topbar-left {
+  display: flex;
+  align-items: stretch;
+  gap: 16px; /* Just a floor — margin-left: auto on .views does the spacing. */
+  padding-left: 16px;
+  padding-right: 12px; /* Keeps the last tab off the column divider. */
+  min-width: 0;
+  --tab-drop: 2px;
+}
+.topbar-right { display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 0.5px; min-width: 0; }
+
+/* ---------- Brand: "Slack → Snack" Animation ---------- */
+.brand {
+  position: relative;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 20px;
+  line-height: 1;
+  white-space: nowrap;
+  --brand-shift: 0.3em; /* Fallback; app.js replaces it with a measured value. */
+  --brand-nudge: 0px; /* Optical tweak on top of the measured shift, if needed. */
+  align-self: center;
+  cursor: pointer; /* Hovering replays the animation, so it reads as interactive. */
+  user-select: none;
+}
+
+.brand-swap { position: relative; display: inline-block; line-height: 1; }
+.brand-l, .brand-n { display: inline-block; line-height: 1; }
+.brand-n { position: absolute; left: 0; top: 0; }
+.brand-ack { display: inline-block; }
+
+/* Resting state is "Slack": the n and the scratch are hidden until the
+   animation runs. Keeping them hidden by default is what lets .play be removed
+   and re-added to replay without a flash of both letters at once. */
+.brand-l { transform-origin: 50% 80%; /* --motion-origin-x/y from the spec. */ }
+.brand-n { transform-origin: 50% 80%; opacity: 0; }
+
+/* app.js adds .play on load and re-adds it on hover to restart. */
+.brand.play .brand-l { animation: brand-l-wobble 4s linear forwards, brand-l-out 4s linear forwards; }
+.brand.play .brand-n { animation: brand-n-spring 4s linear forwards, brand-n-fade 4s linear forwards; }
+.brand.play .brand-ack { animation: brand-ack-room 4s linear forwards; }
+.brand-scratch {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.62em;
+  height: 0.78em;
+  transform: translate(-50%, -52%);
+  overflow: visible;
+  pointer-events: none;
+  color: #ff791f; /* The marker colour from the Figma file. */
+  opacity: 0;
+}
+.brand-scratch path { stroke: currentColor; }
+.brand.play .brand-scratch { animation: brand-scratch-show 4s linear forwards; }
+.brand.play .brand-scratch path { animation: brand-scratch-draw 4s linear forwards; }
+
+@keyframes brand-l-wobble {
+  0%, 19.375% { transform: rotate(0deg); }
+  21.563% { transform: rotate(-4deg); }
+  24.063% { transform: rotate(4deg); }
+  26.563% { transform: rotate(-3deg); }
+  29.375% { transform: rotate(2deg); }
+  34.375%, 100% { transform: rotate(0deg); }
+}
+@keyframes brand-l-out {
+  0%, 33.75% { opacity: 1; }
+  36.875%, 100% { opacity: 0; }
+}
+@keyframes brand-ack-room {
+  0% { transform: translateX(0); }
+  36.25% { transform: translateX(0); animation-timing-function: ease-in-out; }
+  41.25%, 100% { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
+}
+@keyframes brand-n-fade {
+  0%, 40.313% { opacity: 0; }
+  41.563%, 100% { opacity: 1; }
+}
+@keyframes brand-n-spring {
+  0%, 40.313% { transform: translateY(0.135em) rotate(8deg) scale(0.75, 0.75); animation-timing-function: ease-out; }
+  45.625% { transform: translateY(-0.063em) rotate(-3deg) scale(1.08, 1.1); animation-timing-function: ease-in-out; }
+  50% { transform: translateY(0.021em) rotate(-1.6deg) scale(0.97, 0.96); animation-timing-function: ease-out; }
+  55%, 100% { transform: translateY(0) rotate(0deg) scale(1, 1); }
+}
+@keyframes brand-scratch-show {
+  0%, 13.75% { opacity: 0; }
+  14.063%, 44.375% { opacity: 1; }
+  44.688%, 100% { opacity: 0; }
+}
+/* pathLength="1" on the path makes these fractions of the whole stroke. */
+@keyframes brand-scratch-draw {
+  0%, 14.063% { stroke-dasharray: 0 1; stroke-dashoffset: 0; }
+  18.125% { stroke-dasharray: 0.18 1; }
+  21.563% { stroke-dasharray: 0.37 1; }
+  25% { stroke-dasharray: 0.58 1; }
+  29.063% { stroke-dasharray: 0.81 1; }
+  33.75% { stroke-dasharray: 1 1; stroke-dashoffset: 0; }
+  35.625% { stroke-dasharray: 1 1; stroke-dashoffset: 0; animation-timing-function: ease-in; }
+  44.375%, 100% { stroke-dasharray: 0 1; stroke-dashoffset: -1; }
+}
+
+/* Hold the finished "Snack" instead of looping. */
+@media (prefers-reduced-motion: reduce) {
+  .brand.play .brand-l,
+  .brand.play .brand-n,
+  .brand.play .brand-ack,
+  .brand.play .brand-scratch,
+  .brand.play .brand-scratch path { animation: none; }
+  .brand .brand-l { opacity: 0; }
+  .brand .brand-n { opacity: 1; transform: none; }
+  .brand .brand-ack { transform: translateX(calc(var(--brand-shift) + var(--brand-nudge))); }
+  .brand .brand-scratch { opacity: 0; }
+}
 .search input {
   width: 280px;
   max-width: 40vw;
@@ -112,13 +225,93 @@ kbd {
   color: var(--text);
   font: inherit;
 }
-.segmented { display: flex; background: var(--surface-2); border-radius: 6px; padding: 2px; }
-.segmented button { border: 0; background: none; padding: 4px 10px; border-radius: 5px; font-size: 13px; color: var(--muted); }
-.segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
-.views button { font-weight: 600; }
+
+.views { display: flex; align-items: stretch; gap: 2px; margin-left: auto; }
+.views button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  padding: calc(var(--tab-drop) * 2) 10px 0;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--muted);
+}
+.views button:hover { color: var(--text); }
+.views button.active { color: var(--text); font-weight: 700; border-bottom-color: var(--text); }
+
+.tab-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.tab-count:empty { display: none; }
+.views button.active .tab-count { background: var(--border); color: var(--text); }
+.tab-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: var(--unread); }
+.tab-dot.on { display: block; }
 .spacer { flex: 1; }
-.icon-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; width: 30px; height: 30px; font-size: 16px; }
-.icon-btn.spinning { animation: spin 0.8s linear infinite; }
+#status {
+  flex: none;
+  width: 120px;
+  padding-left: 8px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  flex: none;
+}
+/* A sliver under the header while anything is fetching. */
+.topbar { position: relative; }
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.app.busy .topbar::after {
+  opacity: 1;
+  animation: topbar-sweep 1.1s linear infinite;
+}
+@keyframes topbar-sweep {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app.busy .topbar::after { animation: none; background: var(--accent); opacity: 0.4; }
+}
+
+/* Only the glyph turns — spinning the button would rotate its border too. */
+.icon-spin { display: block; line-height: 1; }
+.icon-btn.spinning .icon-spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .panes { flex: 1; display: grid; grid-template-columns: minmax(340px, 440px) 1fr; min-height: 0; }
@@ -176,6 +369,120 @@ kbd {
 .type-pill.thread { color: var(--accent); background: var(--accent-soft); }
 .type-pill.dm { color: var(--dm); background: var(--dm-bg); }
 .type-pill.mention { color: var(--mention); background: var(--mention-bg); }
+.type-pill.working { color: var(--dm); background: var(--dm-bg); }
+.type-pill.done { color: var(--muted); background: var(--surface-2); }
+.type-pill.blocked { color: var(--mention); background: var(--mention-bg); }
+
+/* Faceted filter box (filters.js): chips sit inline before the input, and the
+   facet menu hangs below the whole box. */
+/* The box now carries the border that the bare input used to, so chips sit
+   inside it. Selectors are .search-prefixed to outrank the responsive
+   `.search input` rule further down. */
+/* Chips and the input sit on one line that scrolls sideways, so the box keeps
+   its height however many chips you add. Nothing here may set `overflow`: this
+   is the popup's positioned ancestor and would clip the menu — the inner
+   .filter-scroll owns the overflow instead. */
+/* Fills the cell, so its width comes from the layout and never from how many
+   chips are in it — adding or removing a chip scrolls the row, never resizes
+   the box. */
+.search { flex: 1; min-width: 0; }
+.search .filter-box {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 3px 5px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.search .filter-box:focus-within { border-color: var(--border-strong); }
+.filter-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain; /* Don't trigger browser back-swipe. */
+}
+.filter-scroll::-webkit-scrollbar { display: none; }
+/* The box carries the border, so the input inside is bare — no nested box, no
+   second focus ring. */
+.search .filter-box input {
+  flex: 1 0 110px; /* Grows when there's room, never shrinks away. */
+  width: auto;
+  max-width: none;
+  border: 0;
+  background: none;
+  padding: 3px 4px;
+}
+.search .filter-box input:focus { outline: none; }
+.filter-chips { display: flex; gap: 4px; flex: none; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none; /* Never squash into the neighbouring chip. */
+  min-width: 0;
+  max-width: 240px;
+  padding: 1px 2px 1px 7px;
+  border-radius: 4px;
+  /* Same weight as the box it sits in — a nested element must never outrank
+     its container. The fill is what separates it; the border just crisps it. */
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.filter-chip b { color: var(--muted); font-weight: 600; flex: none; }
+.filter-chip .chip-v { overflow: hidden; text-overflow: ellipsis; }
+.filter-chip.pinned { padding-right: 5px; cursor: pointer; }
+.filter-chip.pinned:hover { background: var(--border); }
+.filter-chip .chip-caret { color: var(--muted); font-size: 9px; line-height: 1; }
+.filter-chip .chip-x {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.filter-chip .chip-x:hover { color: var(--text); }
+.filter-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  text-align: left;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-row b { font-weight: 600; color: var(--text); }
+.filter-row .muted { margin-left: auto; font-size: 12px; }
+.filter-row.active, .filter-row:hover { background: var(--surface-2); }
 .tag { font-size: 11px; font-weight: 600; border-radius: 4px; padding: 0 5px; }
 .tag.replied { color: var(--muted); border: 1px solid var(--border); }
 .tag.todo { color: var(--mention); background: var(--mention-bg); }
@@ -429,6 +736,9 @@ a.media { cursor: pointer; }
 
 @media (max-width: 760px) {
   .panes { grid-template-columns: 1fr; }
+  /* No divider to line up with: stack the two topbar cells instead. */
+  .topbar { grid-template-columns: 1fr; row-gap: 8px; }
+  .topbar-left { padding-right: 16px; }
   .detail-pane { display: none; }
   .app.show-detail .list-pane { display: none; }
   .app.show-detail .detail-pane { display: flex; }

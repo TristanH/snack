@@ -4,6 +4,7 @@
 import * as backend from './backend.js';
 import { emojiChar, emojiHtml, searchEmoji, setCustomEmoji } from './emoji.js';
 import { attachAutocomplete } from './autocomplete.js';
+import { attachFilters } from './filters.js';
 import { messageTexts } from './lib/threads.js';
 
 const DEFAULT_RECENT_EMOJI = ['+1', 'eyes', 'white_check_mark', 'heart', 'joy', 'tada', 'pray', 'raised_hands', 'fire', '100'];
@@ -17,15 +18,27 @@ const state = {
   channels: {},
   bots: {},
   meta: {},
-  view: 'inbox', // 'inbox' | 'channels'
+  view: 'inbox', // a key of VIEWS
   inboxItems: [], // threads, DMs and mentions, merged (see lib/inbox.js)
   inboxLoaded: false,
-  filter: 'all',
   channelItems: [],
   mentionItems: [],
   channelCounts: {},
   channelsLoaded: false,
   channelsLoading: false,
+  gregbotItems: [], // threads gregbot is working in (see lib/gregbot.js)
+  gregbotCounts: {},
+  gregbotCallers: [],
+  gregbotLoaded: false,
+  gregbotLoading: false,
+  gregbotLoadingDays: undefined,
+  // Faceted filter chips, per view (see filters.js). Inbox's Show chip is
+  // pinned — always present, never removable.
+  chips: {
+    inbox: [{ facet: 'show', value: 'all', label: 'All', facetLabel: 'Show' }],
+    // No Status chip by default: a dead run leaves a stale "Thinking…" and reads as Working.
+    gregbot: [{ facet: 'age', value: '30d', label: '1 month', facetLabel: 'Within' }],
+  },
   sections: [],
   backTo: null, // { key, scrollTop } while viewing a thread opened from a conversation
   detail: null, // { channel, messages: Map<ts, message> } for the open conversation
@@ -42,6 +55,7 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 const EMPTY_DETAIL = $('#detail').innerHTML;
+let filterUi = null; // The faceted filter box, once bound (see filters.js).
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -230,9 +244,7 @@ function permalink(channel, ts, threadTs) {
 // ---------------------------------------------------------------------------
 // Inbox: threads you're in, DMs and @-mentions, as one list.
 
-// An archived item stays out of the inbox until something newer than what
-// you archived arrives, then it's back. (Mentions never change, so archiving
-// one is permanent.)
+// An archived item comes back once something newer than its archive stamp arrives.
 function isArchived(item) {
   const ts = state.archived[item.key];
   return Boolean(ts) && Number(item.lastTs) <= Number(ts);
@@ -245,11 +257,38 @@ function inboxHaystack(item) {
   return [channelLabel(item.channel), ...msgs.filter(Boolean).flatMap((m) => [...messageTexts(m).map(plain), authorOf(m)])].join(' ').toLowerCase();
 }
 
+// The active filter in the current view (each view keeps its own).
+// The active filter chips in a view (see filters.js).
+const chipsOf = (view) => state.chips[view] || [];
+const chipValue = (view, facet) => chipsOf(view).find((c) => c.facet === facet)?.value;
+
+// The Inbox's only facet, and a pinned one: always exactly one value.
+function inboxFacets() {
+  const items = state.inboxItems;
+  const archived = items.filter(isArchived).length;
+  return [
+    {
+      key: 'show',
+      label: 'Show',
+      pinned: true,
+      exclusive: true,
+      values: [
+        { value: 'all', label: 'All', count: items.length - archived },
+        { value: 'unread', label: 'Unread', count: items.filter((i) => i.unread && !isArchived(i)).length },
+        { value: 'archived', label: 'Archived', count: archived },
+      ],
+    },
+  ];
+}
+
+const inboxShow = () => chipValue('inbox', 'show') || 'all';
+
 function visibleInbox() {
   const q = state.query.trim().toLowerCase();
+  const show = inboxShow();
   return state.inboxItems.filter((item) => {
-    if (state.filter === 'archived' ? !isArchived(item) : isArchived(item)) return false;
-    if (state.filter === 'unread' && !item.unread) return false;
+    if (show === 'archived' ? !isArchived(item) : isArchived(item)) return false;
+    if (show === 'unread' && !item.unread) return false;
     return !q || inboxHaystack(item).includes(q);
   });
 }
@@ -309,13 +348,13 @@ function mentionRowHtml(m) {
 const inboxRowHtml = (item) =>
   ({ thread: threadRowHtml, dm: conversationRowHtml, channel: conversationRowHtml, mention: mentionRowHtml })[item.type](item);
 
-const visibleItems = () => (state.view === 'inbox' ? visibleInbox() : visibleChannels());
+const visibleItems = () => currentView().items();
 
 function renderList() {
   const list = $('#thread-list');
-  const isInbox = state.view === 'inbox';
+  const view = currentView();
   const items = visibleItems();
-  const entries = isInbox ? items : withSectionHeaders(items);
+  const entries = view.grouped ? withSectionHeaders(items) : items;
   const els = entries.map((item) => {
     let row = rowCache.get(item.key);
     if (!row) {
@@ -323,12 +362,12 @@ function renderList() {
       row.el.dataset.key = item.key;
       rowCache.set(item.key, row);
     }
-    const html = item.header ? sectionHeaderHtml(item) : isInbox ? inboxRowHtml(item) : channelRowHtml(item);
+    const html = item.header ? sectionHeaderHtml(item) : view.row(item);
     if (row.html !== html) {
       row.el.innerHTML = html;
       row.html = html;
     }
-    const unread = isInbox ? item.unread : !item.read;
+    const unread = !item.header && view.unread(item);
     const className = item.header
       ? 'section-header'
       : ['thread-item', unread && 'unread', item.key === state.selectedKey && 'selected'].filter(Boolean).join('\n');
@@ -340,32 +379,66 @@ function renderList() {
   });
   while (list.children.length > els.length) list.lastElementChild.remove();
 
-  const loaded = isInbox ? state.inboxLoaded : state.channelsLoaded;
-  if (!items.length && loaded) {
-    const empty = isInbox
-      ? { all: 'Inbox zero 🎉', unread: 'Nothing unread.', archived: 'Nothing archived.' }[state.filter]
-      : 'All caught up 🎉';
-    list.insertAdjacentHTML('beforeend', `<li class="list-empty muted">${state.query ? 'Nothing matches.' : empty}</li>`);
+  if (!items.length && view.isLoaded()) {
+    list.insertAdjacentHTML('beforeend', `<li class="list-empty muted">${state.query ? 'Nothing matches.' : view.empty()}</li>`);
   } else if (!items.length) {
     list.insertAdjacentHTML('beforeend', `<li class="list-empty muted">Loading…</li>`);
   }
 
   const unread = state.inboxItems.filter((i) => i.unread && !isArchived(i)).length;
-  $('#unread-count').textContent = unread ? `(${unread})` : '';
-  $('#inbox-count').textContent = unread ? `(${unread})` : '';
-  const { unread: unreadChannels, ignored } = state.channelCounts;
-  $('#channels-count').textContent = unreadChannels ? `(${unreadChannels})` : '';
+  $('#inbox-count').textContent = unread || '';
+  $('#channels-count').textContent = state.channelCounts.unread || '';
+  const working = state.gregbotCounts.working || 0;
+  $('#gregbot-count').classList.toggle('on', working > 0); // A dot, not a count.
 
-  const footer = $('#list-footer');
-  if (!isInbox) {
-    footer.textContent = `${items.length} ${items.length === 1 ? 'conversation' : 'conversations'}${
-      ignored ? ` · ${ignored} muted or ignored not shown` : ''
-    }`;
-    return;
-  }
   // No "load older": an old thread that gets a new reply comes back on its own.
-  footer.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+  $('#list-footer').textContent = view.footer(items.length);
 }
+
+// One source of truth for "is Snack fetching anything"; every loader registers here.
+const fetching = new Map(); // name -> detail string ('' for no detail)
+
+function renderActivity() {
+  const busy = fetching.size > 0;
+  $('#refresh').classList.toggle('spinning', busy);
+  $('.app').classList.toggle('busy', busy);
+  if (!busy) return;
+  // Prefer a detailed message ("Gregbot 12/37") over the generic one.
+  const detail = [...fetching.values()].find(Boolean);
+  $('#status').textContent = detail || 'Syncing…';
+}
+
+// A warm refresh finishes too fast to see, so hold the indicator a beat.
+const MIN_BUSY_MS = 650;
+let busySince = 0;
+let holdTimer = null;
+
+function setFetching(name, on, detail = '') {
+  if (on) {
+    if (!fetching.size) busySince = Date.now();
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    fetching.set(name, detail);
+    return renderActivity();
+  }
+  fetching.delete(name);
+  if (fetching.size) return renderActivity(); // Something else is still going.
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    renderActivity();
+    // Only stamp over our own busy text — never over an error a loader set.
+    const shown = $('#status').textContent;
+    if (shown.startsWith('Syncing') || shown.startsWith('Gregbot')) markUpdated();
+  }, Math.max(0, MIN_BUSY_MS - (Date.now() - busySince)));
+}
+
+const markUpdated = () => {
+  // Don't stamp "Updated" over a sibling fetch that's still going, or over the
+  // minimum-visible hold — the hold stamps it itself when it expires.
+  if (fetching.size || holdTimer) return;
+  $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+};
 
 function applyInbox(data) {
   mergeDirectory(data);
@@ -381,25 +454,25 @@ function applyInbox(data) {
 async function loadInbox({ full = false } = {}) {
   if (state.loading) return;
   state.loading = true;
-  $('#refresh').classList.add('spinning');
-  if (full || !state.inboxItems.length) $('#status').textContent = 'Loading…';
+  setFetching('inbox', true);
   try {
     const data = await backend.getInbox({
       full,
       onUpdate: (update) => {
         applyInbox(update);
-        if (!update.progress.done) $('#status').textContent = 'Syncing threads…';
+        if (!update.progress.done) setFetching('inbox', true, 'Syncing threads…');
       },
     });
     applyInbox(data);
-    $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    markUpdated();
   } catch (err) {
     if (err instanceof backend.AuthError) return showConnect(err.message);
     $('#status').textContent = `Error: ${err.message}`;
     console.error(err);
   } finally {
     state.loading = false;
-    $('#refresh').classList.remove('spinning');
+    setFetching('inbox', false);
+    markUpdated();
   }
 }
 
@@ -421,17 +494,10 @@ function moveSelection(delta) {
   else select(next.key);
 }
 
-function openItem(key) {
-  if (state.view === 'channels') return openChannel(key);
-  const item = state.inboxItems.find((i) => i.key === key);
-  ({ thread: openThread, dm: openConversation, channel: openConversation, mention: openMention })[item?.type]?.(key);
-}
+const openItem = (key) => currentView().open(key);
 
-// `e`: archive an inbox item, or mark a channel done.
-function doneItem(key) {
-  if (state.view === 'channels') dismissChannel(key);
-  else toggleArchive(key);
-}
+// `e`: archive an inbox item, or mark a channel done. Some views have neither.
+const doneItem = (key) => currentView().done?.(key);
 
 // Shows the mention in context, and marks it seen (in Slack, only up to the mention).
 async function openMention(key) {
@@ -608,23 +674,28 @@ function channelRowHtml(c) {
     </div>`;
 }
 
-async function loadChannels() {
+// maxAgeMs: passed through to the service's age guard.
+async function loadChannels({ maxAgeMs } = {}) {
   if (state.channelsLoading) return;
   state.channelsLoading = true;
+  setFetching('channels', true);
   try {
-    const data = await backend.getChannels();
+    const data = await backend.getChannels({ maxAgeMs });
     mergeDirectory(data);
     state.channelCounts = data.counts;
     state.sections = data.sections || [];
     state.channelItems = data.items;
     state.channelsLoaded = true;
     renderList();
+    markUpdated();
   } catch (err) {
     if (err instanceof backend.AuthError) return showConnect(err.message);
     $('#status').textContent = `Error: ${err.message}`;
     console.error(err);
   } finally {
     state.channelsLoading = false;
+    setFetching('channels', false);
+    markUpdated();
   }
 }
 
@@ -723,7 +794,326 @@ function advanceAfterRemoving(key, wasOpen) {
 }
 
 // ---------------------------------------------------------------------------
-// Views
+
+// Working, but silent for this long: probably stuck, and worth saying so.
+const STALE_MS = 30 * 60 * 1000;
+const isStale = (t) => t.working && Date.now() - Number(t.lastTs) * 1000 > STALE_MS;
+
+// How long ago, as a duration ("18m", "5h") rather than a clock time.
+function sinceText(ts) {
+  const mins = Math.floor((Date.now() - Number(ts) * 1000) / 60000);
+  if (mins < 60) return `${Math.max(0, mins)}m`;
+  const hours = Math.floor(mins / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+// Facets for the filter box, with a count per value.
+function gregbotFacets() {
+  const items = state.gregbotItems;
+  const tally = (valuesOf) => {
+    const counts = new Map();
+    for (const t of items) for (const v of valuesOf(t)) counts.set(v, (counts.get(v) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  const countOf = (test) => items.filter(test).length;
+
+  return [
+    { key: 'by', label: 'Initiated by', values: tally((t) => t.callers).map(([id, count]) => ({ value: id, label: userName(id), count })) },
+    { key: 'in', label: 'In', values: tally((t) => [t.channel]).map(([id, count]) => ({ value: id, label: channelLabel(id), count })) },
+    {
+      key: 'status',
+      label: 'Status',
+      exclusive: true,
+      values: [
+        { value: 'working', label: 'Working', count: countOf((t) => t.working) },
+        { value: 'done', label: 'Done', count: countOf((t) => !t.working) },
+      ],
+    },
+    {
+      key: 'is',
+      label: 'Is',
+      values: [
+        { value: 'blocked', label: 'Blocked on approval', count: countOf((t) => t.blocked) },
+        { value: 'quiet', label: 'Quiet — maybe stuck', count: countOf(isStale) },
+      ],
+    },
+    {
+      key: 'has',
+      label: 'Has',
+      values: [
+        { value: 'pr', label: 'A PR', count: countOf((t) => t.did?.pr) },
+        { value: 'linear', label: 'A Linear ticket', count: countOf((t) => t.did?.linear) },
+      ],
+    },
+    // Changes how far back we fetch, so only one at a time.
+    {
+      key: 'age',
+      label: 'Within',
+      exclusive: true,
+      // Pinned: it sets the fetch window as well as filtering the list, so it
+      // can't be removed — otherwise display and fetch silently disagree.
+      pinned: true,
+      // Bounded on purpose: all-time cost ~50 sequential search pages.
+      values: [
+        { value: '7d', label: '7 days' },
+        { value: '30d', label: '1 month' },
+        { value: '60d', label: '2 months' },
+      ],
+    },
+  ];
+}
+
+// Midnight local, `days` ago. Must match lib/gregbot.js's copy.
+function dayCutoff(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() / 1000;
+}
+
+const CHIP_MATCH = {
+  by: (t, v) => t.callers.includes(v),
+  in: (t, v) => t.channel === v,
+  status: (t, v) => (v === 'working' ? t.working : !t.working),
+  is: (t, v) => (v === 'blocked' ? Boolean(t.blocked) : isStale(t)),
+  has: (t, v) => Boolean(t.did?.[v]),
+  age: (t, v) => Number(t.lastTs) >= dayCutoff(parseInt(v, 10)),
+};
+
+// Several values of one facet are OR'd (a thread both artem and tristan called
+// shows under either); different facets are AND'd.
+function matchesChips(item, chips) {
+  const byFacet = new Map();
+  for (const c of chips) byFacet.set(c.facet, [...(byFacet.get(c.facet) || []), c.value]);
+  for (const [facet, values] of byFacet) {
+    const test = CHIP_MATCH[facet];
+    if (test && !values.some((v) => test(item, v))) return false;
+  }
+  return true;
+}
+
+// How far back to fetch; the Within chip decides.
+function gregbotDays() {
+  const chosen = chipsOf('gregbot').find((c) => c.facet === 'age')?.value;
+  return parseInt(chosen || '', 10) || 30;
+}
+
+// Built once per item and cached on it.
+function gregbotHaystack(t) {
+  if (t.haystack === undefined) {
+    t.haystack = [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), plain(t.searchText || '')]
+      .join(' ')
+      .toLowerCase();
+  }
+  return t.haystack;
+}
+
+// Do a and b differ by at most one insertion, deletion or substitution?
+function within1(a, b) {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i++;
+      j++;
+    } else if (++edits > 1) {
+      return false;
+    } else if (short.length === long.length) {
+      i++;
+      j++;
+    } else {
+      j++;
+    }
+  }
+  return true;
+}
+
+// Typo tolerance, but only as a fallback — see visibleGregbot.
+function looselyHas(t, token) {
+  if (token.length < 4) return false;
+  t.words ??= [...new Set(gregbotHaystack(t).split(/[^a-z0-9]+/))].filter((w) => w.length > 2);
+  return t.words.some((w) => Math.abs(w.length - token.length) <= 1 && within1(w, token));
+}
+
+function visibleGregbot() {
+  const chips = chipsOf('gregbot');
+  // Chips first — cheap, and they shrink the set the text search runs over.
+  const pool = state.gregbotItems.filter((t) => matchesChips(t, chips));
+  const tokens = state.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return pool;
+
+  // Every token has to appear somewhere, in any order — so "tts timer sleep"
+  // finds a sleep-timer thread in #tts.
+  const exact = pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok));
+  });
+  if (exact.length) return exact;
+
+  // Nothing matched exactly, so retry allowing one typo per token. Running
+  // this only on a miss keeps the common case a plain substring scan.
+  return pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok) || looselyHas(t, tok));
+  });
+}
+
+function gregbotRowHtml(t) {
+  const status = t.working
+    ? `<span class="type-pill working">Working${t.minutes ? ` · ${t.minutes}m` : ''}</span>`
+    : '<span class="type-pill done">Done</span>';
+  // Everyone who called gregbot here, not just whoever started the thread.
+  const who = t.callers.map(userName).join(', ');
+  // The instruction is the ticket; gregbot's own latest line is the progress.
+  const ask = t.ask ? plain(t.ask) : '';
+  const preview = (t.working && t.step) || messagePreview(t.last);
+  return `
+    <span class="dot"></span>
+    <div class="row">
+      ${status}
+      ${t.blocked ? '<span class="type-pill blocked">Needs approval</span>' : ''}
+      <span class="channel">${escapeHtml(channelLabel(t.channel))}${who ? ` · ${escapeHtml(who)}` : ''}</span>
+      <span class="time" title="${escapeHtml(fullTime(t.lastTs))}">${escapeHtml(relativeTime(t.lastTs))}</span>
+    </div>
+    ${ask ? `<div class="row root"><span>${escapeHtml(ask)}</span></div>` : ''}
+    <div class="row latest"><span>${escapeHtml(preview)}</span></div>
+    <div class="row meta">
+      <span>${t.count} ${t.count === 1 ? 'update' : 'updates'}${
+        isStale(t) ? ` · <span class="tag todo">quiet ${escapeHtml(sinceText(t.lastTs))}</span>` : ''
+      }</span>
+      <span class="row-end">${
+        t.sessionUrl
+          ? `<a class="row-action" href="${escapeHtml(t.sessionUrl)}" target="_blank" rel="noreferrer" data-tip="Open gregbot’s session">Session ↗</a>`
+          : ''
+      }</span>
+    </div>`;
+}
+
+// maxAgeMs: skip if refreshed that recently.
+const PROGRESS_RENDER_MS = 400;
+let lastProgressRender = 0;
+
+async function loadGregbot({ maxAgeMs = 0 } = {}) {
+  const days = gregbotDays();
+  // Only bail if the same window is already loading — switching to a narrower
+  // one must be able to interrupt a long all-time page-through.
+  if (state.gregbotLoading && state.gregbotLoadingDays === days) return;
+  state.gregbotLoading = true;
+  state.gregbotLoadingDays = days;
+  setFetching('gregbot', true);
+  try {
+    // A skipped refresh still returns a snapshot, just of unchanged data.
+    const data = await backend.getGregbot({
+      days,
+      maxAgeMs,
+      // Render what has arrived rather than waiting for the whole sweep.
+      onProgress: async ({ page, pages }) => {
+        if (state.gregbotLoadingDays !== days) return;
+        // A snapshot re-scans every thread, so throttle the per-page renders.
+        const now = Date.now();
+        if (page < pages && now - lastProgressRender < PROGRESS_RENDER_MS) return;
+        lastProgressRender = now;
+        const partial = await backend.gregbotSnapshot();
+        if (state.gregbotLoadingDays !== days) return;
+        mergeDirectory(partial);
+        state.gregbotItems = partial.items;
+        state.gregbotCounts = partial.counts;
+        state.gregbotCallers = partial.callers;
+        state.gregbotLoaded = true;
+        renderList();
+      },
+    });
+    if (state.gregbotLoadingDays !== days) return; // Superseded.
+    mergeDirectory(data);
+    state.gregbotItems = data.items;
+    state.gregbotCounts = data.counts;
+    state.gregbotCallers = data.callers;
+    state.gregbotLoaded = true;
+    renderList();
+    markUpdated();
+  } catch (err) {
+    if (err instanceof backend.AuthError) return showConnect(err.message);
+    $('#status').textContent = `Error: ${err.message}`;
+    console.error(err);
+  } finally {
+    if (state.gregbotLoadingDays === days) {
+      state.gregbotLoading = false;
+      state.gregbotLoadingDays = undefined;
+      setFetching('gregbot', false);
+      markUpdated();
+    }
+  }
+}
+
+// These threads aren't in the thread inbox, so hand openThread the row itself.
+function openGregbotThread(key) {
+  const t = state.gregbotItems.find((x) => x.key === key);
+  if (t) openThread(t.key, { thread: { ...t, isUnread: false } });
+}
+
+// ---------------------------------------------------------------------------
+
+function openInboxItem(key) {
+  const item = state.inboxItems.find((i) => i.key === key);
+  ({ thread: openThread, dm: openConversation, channel: openConversation, mention: openMention })[item?.type]?.(key);
+}
+
+const VIEWS = {
+  inbox: {
+    items: visibleInbox,
+    row: inboxRowHtml,
+    open: openInboxItem,
+    done: toggleArchive,
+    load: () => loadInbox({ full: true }),
+    isLoaded: () => state.inboxLoaded,
+    unread: (item) => item.unread,
+    grouped: false,
+    empty: () => ({ all: 'Inbox zero 🎉', unread: 'Nothing unread.', archived: 'Nothing archived.' })[inboxShow()],
+    footer: (n) => `${n} ${n === 1 ? 'item' : 'items'}`,
+  },
+  channels: {
+    items: visibleChannels,
+    row: channelRowHtml,
+    open: openChannel,
+    done: dismissChannel,
+    load: () => loadChannels({ maxAgeMs: 0 }),
+    isLoaded: () => state.channelsLoaded,
+    unread: (item) => !item.read,
+    grouped: true,
+    empty: () => 'All caught up 🎉',
+    footer: (n) =>
+      `${n} ${n === 1 ? 'conversation' : 'conversations'}${
+        state.channelCounts.ignored ? ` · ${state.channelCounts.ignored} muted or ignored not shown` : ''
+      }`,
+  },
+  gregbot: {
+    items: visibleGregbot,
+    row: gregbotRowHtml,
+    open: openGregbotThread,
+    done: null, // Nothing to archive: the list is simply what gregbot is doing.
+    load: () => loadGregbot(),
+    isLoaded: () => state.gregbotLoaded,
+    unread: (item) => item.working, // Live tickets get the dot.
+    grouped: false,
+    // Within is pinned, so it's always present — only chips beyond it mean the
+    // user actually narrowed something.
+    empty: () =>
+      chipsOf('gregbot').some((c) => c.facet !== 'age')
+        ? 'Nothing matches these filters.'
+        : 'No gregbot threads in this window.',
+    footer: (n) => {
+      const { working = 0, blocked = 0 } = state.gregbotCounts;
+      const parts = [working && `${working} in progress`, blocked && `${blocked} awaiting approval`].filter(Boolean);
+      return `${n} ${n === 1 ? 'thread' : 'threads'}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+    },
+  },
+};
+
+const currentView = () => VIEWS[state.view];
 
 function setView(view) {
   if (state.view === view) return;
@@ -731,17 +1121,15 @@ function setView(view) {
   state.selectedKey = null;
   closeThread();
   document.querySelectorAll('.views button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  document.querySelectorAll('.filters').forEach((f) => (f.hidden = f.dataset.view !== view));
   $('#search').placeholder = `Filter ${view}`;
   $('.list-pane').scrollTop = 0;
+  filterUi?.close();
+  filterUi?.renderChips(); // Chips are per view.
   renderList();
-  if (view === 'channels') loadChannels();
+  if (!currentView().isLoaded()) currentView().load();
 }
 
-function refreshView() {
-  if (state.view === 'inbox') loadInbox({ full: true });
-  else loadChannels();
-}
+const refreshView = () => currentView().load();
 
 // ---------------------------------------------------------------------------
 // Thread detail
@@ -784,8 +1172,6 @@ function blocksHtml(blocks) {
 }
 
 // ---------------------------------------------------------------------------
-// Media: images, video and PDF thumbnails inline (as in Slack); click an image
-// to see it full size.
 
 const MEDIA_MAX_W = 360;
 const MEDIA_MAX_H = 260;
@@ -798,9 +1184,7 @@ function mediaBox(w, h, maxW = MEDIA_MAX_W, maxH = MEDIA_MAX_H) {
   return `width:${Math.max(40, Math.round(w * scale))}px;aspect-ratio:${w}/${h}`;
 }
 
-// src: a public image URL. slack: a files.slack.com URL, which needs your
-// session and so loads through the extension (see hydrateMedia).
-// full: shown when clicked; href: opened instead (videos, PDFs).
+// src: a public image URL. slack: a files.slack.com URL, which needs auth.
 function mediaHtml({ src, slack, w, h, full, href, play = false, alt = '' }) {
   const img = slack
     ? `<img data-slack-src="${escapeHtml(slack)}" alt="${escapeHtml(alt)}" />`
@@ -1097,8 +1481,8 @@ function showEmptyDetail() {
 
 function goBack() {
   const { key, scrollTop } = state.backTo;
-  if (state.view === 'inbox') openItem(key);
-  else openChannel(key, { restoreScroll: scrollTop });
+  if (state.view === 'channels') openChannel(key, { restoreScroll: scrollTop });
+  else openItem(key);
 }
 
 function closeThread() {
@@ -1494,8 +1878,6 @@ function bindEmojiPicker() {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard shortcuts. This one table drives the key handler, the hover
-// tooltips (via data-shortcut) and the ? overlay.
 
 const SHORTCUTS = {
   next: { group: 'Navigate', label: 'Next', show: ['J'], keys: ['j', 'ArrowDown'], run: () => moveSelection(1) },
@@ -1507,10 +1889,11 @@ const SHORTCUTS = {
 
   inbox: { group: 'Lists', label: 'Inbox', show: ['I'], keys: ['i'], run: () => setView('inbox') },
   channels: { group: 'Lists', label: 'Channels', show: ['C'], keys: ['c'], run: () => setView('channels') },
-  toggleView: { group: 'Lists', label: 'Switch Inbox ⇄ Channels', show: ['`'], keys: ['`'], run: () => cycleView() },
-  filter1: { group: 'Lists', label: 'Inbox: all', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
-  filter2: { group: 'Lists', label: 'Inbox: unread', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
-  filter3: { group: 'Lists', label: 'Inbox: archived', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
+  gregbot: { group: 'Lists', label: 'Gregbot', show: ['G'], keys: ['g'], run: () => setView('gregbot') },
+  toggleView: { group: 'Lists', label: 'Next list', show: ['`'], keys: ['`'], run: () => cycleView() },
+  filter1: { group: 'Lists', label: 'Show all', show: ['1'], keys: ['1'], run: () => pickFilter(0) },
+  filter2: { group: 'Lists', label: 'Show unread', show: ['2'], keys: ['2'], run: () => pickFilter(1) },
+  filter3: { group: 'Lists', label: 'Show archived', show: ['3'], keys: ['3'], run: () => pickFilter(2) },
   search: { group: 'Lists', label: 'Filter list', show: ['/'], keys: ['/'], run: () => $('#search').focus() },
   refresh: { group: 'Lists', label: 'Refresh', show: ['⇧', 'R'], keys: ['Shift+R'], run: () => refreshView() },
 
@@ -1560,13 +1943,15 @@ function escape() {
   }
 }
 
-const VIEW_ORDER = ['inbox', 'channels'];
 function cycleView() {
-  setView(VIEW_ORDER[(VIEW_ORDER.indexOf(state.view) + 1) % VIEW_ORDER.length]);
+  const order = Object.keys(VIEWS);
+  setView(order[(order.indexOf(state.view) + 1) % order.length]);
 }
 
+// 1/2/3 pick the nth value of the current view's pinned facet (the Inbox's
+// Show chip); a no-op in a view that hasn't got one.
 function pickFilter(i) {
-  document.querySelector('.filters:not([hidden])')?.querySelectorAll('button')[i]?.click();
+  filterUi?.selectPinned(i);
 }
 
 function scrollDetail(direction) {
@@ -1589,10 +1974,12 @@ function focusComposer() {
 function openInSlack() {
   const link = $('#detail .open-slack');
   if (link) return window.open(link.href, '_blank', 'noreferrer');
-  const i = state.view === 'inbox' && state.inboxItems.find((x) => x.key === state.selectedKey);
-  const c = state.view === 'channels' && state.channelItems.find((x) => x.key === state.selectedKey);
-  if (i) window.open(permalink(i.channel, i.threadTs || i.ts || i.lastTs, i.threadTs), '_blank', 'noreferrer');
-  else if (c) window.open(permalink(c.id, c.latest), '_blank', 'noreferrer');
+  const item = visibleItems().find((x) => x.key === state.selectedKey);
+  if (!item) return;
+  // Channels view rows are conversations (id/latest); every other row has a channel.
+  const channel = item.channel || item.id;
+  const ts = item.threadTs || item.ts || item.lastTs || item.latest;
+  if (channel && ts) window.open(permalink(channel, ts, item.threadTs), '_blank', 'noreferrer');
 }
 
 // In the filter box: ↓ / Enter jump into the results, Esc clears.
@@ -1680,18 +2067,30 @@ function bindUi() {
     const item = e.target.closest('.thread-item');
     if (!item) return;
     if (e.target.closest('[data-action="archive"]')) doneItem(item.dataset.key);
-    else openItem(item.dataset.key);
+    else if (!e.target.closest('a')) openItem(item.dataset.key); // Links in a row are their own target.
+
   });
   $('#search').addEventListener('input', (e) => {
     state.query = e.target.value;
     renderList();
   });
+  // Faceted chips live in the same box; a view with no facets is unaffected.
+  filterUi = attachFilters($('#search'), {
+    facets: () => ({ inbox: inboxFacets, gregbot: gregbotFacets }[state.view]?.() || []),
+    chips: () => chipsOf(state.view),
+    onChange: (next) => {
+      const before = gregbotDays();
+      state.chips[state.view] = next;
+      renderList();
+      // A wider Within window needs a deeper fetch.
+      if (state.view === 'gregbot' && gregbotDays() !== before) loadGregbot();
+    },
+  });
   document.querySelectorAll('.views button').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
-  document.querySelectorAll('.filters[data-view="inbox"] button').forEach((btn) =>
-    btn.addEventListener('click', () => setFilter(btn.dataset.filter)),
-  );
   $('#refresh').addEventListener('click', refreshView);
 
+  sizeBrand();
+  bindBrand();
   document.addEventListener('keydown', onKeyDown);
   bindReactions();
   bindEmojiPicker();
@@ -1707,15 +2106,42 @@ function bindUi() {
     if (document.visibilityState !== 'visible') return;
     loadInbox();
     loadChannels();
+    loadGregbot({ maxAgeMs: 120_000 }); // Paged search; don't hammer it every minute.
   };
   setInterval(refreshAll, REFRESH_MS);
   document.addEventListener('visibilitychange', refreshAll);
 }
 
-function setFilter(filter) {
-  state.filter = filter;
-  document.querySelectorAll('.filters[data-view="inbox"] button').forEach((b) => b.classList.toggle('active', b.dataset.filter === filter));
-  renderList();
+
+function sizeBrand() {
+  const brand = $('.brand');
+  if (!brand) return;
+  const style = getComputedStyle(brand);
+  const probe = document.createElement('span');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;white-space:pre';
+  for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) probe.style[prop] = style[prop];
+  document.body.append(probe);
+  const widthOf = (text) => {
+    probe.textContent = text;
+    return probe.getBoundingClientRect().width;
+  };
+  const shift = widthOf('n') - widthOf('l');
+  probe.remove();
+  if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
+}
+
+// Runs the brand animation on load, and again on hover.
+function bindBrand() {
+  const brand = $('.brand');
+  if (!brand) return;
+  const play = () => {
+    brand.classList.remove('play');
+    void brand.offsetWidth;
+    brand.classList.add('play');
+  };
+  play();
+  brand.addEventListener('mouseenter', play);
 }
 
 let uiBound = false;
@@ -1761,6 +2187,7 @@ async function boot() {
   }
   loadInbox({ full: true });
   loadChannels(); // For the Channels tab count.
+  loadGregbot(); // For the Gregbot tab count.
 }
 
 boot();

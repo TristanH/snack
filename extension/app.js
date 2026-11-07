@@ -31,6 +31,7 @@ const state = {
   gregbotCallers: [],
   gregbotLoaded: false,
   gregbotLoading: false,
+  gregbotLoadingDays: undefined,
   // Faceted filter chips, per view (see filters.js). Inbox's Show chip is
   // pinned — always present, never removable.
   chips: {
@@ -394,7 +395,48 @@ function renderList() {
   $('#list-footer').textContent = view.footer(items.length);
 }
 
+// One source of truth for "is Snack fetching anything"; every loader registers here.
+const fetching = new Map(); // name -> detail string ('' for no detail)
+
+function renderActivity() {
+  const busy = fetching.size > 0;
+  $('#refresh').classList.toggle('spinning', busy);
+  $('.app').classList.toggle('busy', busy);
+  if (!busy) return;
+  // Prefer a detailed message ("Gregbot 12/37") over the generic one.
+  const detail = [...fetching.values()].find(Boolean);
+  $('#status').textContent = detail || 'Syncing…';
+}
+
+// A warm refresh finishes too fast to see, so hold the indicator a beat.
+const MIN_BUSY_MS = 650;
+let busySince = 0;
+let holdTimer = null;
+
+function setFetching(name, on, detail = '') {
+  if (on) {
+    if (!fetching.size) busySince = Date.now();
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    fetching.set(name, detail);
+    return renderActivity();
+  }
+  fetching.delete(name);
+  if (fetching.size) return renderActivity(); // Something else is still going.
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    renderActivity();
+    // Only stamp over our own busy text — never over an error a loader set.
+    const shown = $('#status').textContent;
+    if (shown.startsWith('Syncing') || shown.startsWith('Gregbot')) markUpdated();
+  }, Math.max(0, MIN_BUSY_MS - (Date.now() - busySince)));
+}
+
 const markUpdated = () => {
+  // Don't stamp "Updated" over a sibling fetch that's still going, or over the
+  // minimum-visible hold — the hold stamps it itself when it expires.
+  if (fetching.size || holdTimer) return;
   $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 };
 
@@ -412,14 +454,13 @@ function applyInbox(data) {
 async function loadInbox({ full = false } = {}) {
   if (state.loading) return;
   state.loading = true;
-  $('#refresh').classList.add('spinning');
-  if (full || !state.inboxItems.length) $('#status').textContent = 'Loading…';
+  setFetching('inbox', true);
   try {
     const data = await backend.getInbox({
       full,
       onUpdate: (update) => {
         applyInbox(update);
-        if (!update.progress.done) $('#status').textContent = 'Syncing threads…';
+        if (!update.progress.done) setFetching('inbox', true, 'Syncing threads…');
       },
     });
     applyInbox(data);
@@ -430,7 +471,8 @@ async function loadInbox({ full = false } = {}) {
     console.error(err);
   } finally {
     state.loading = false;
-    $('#refresh').classList.remove('spinning');
+    setFetching('inbox', false);
+    markUpdated();
   }
 }
 
@@ -636,6 +678,7 @@ function channelRowHtml(c) {
 async function loadChannels({ maxAgeMs } = {}) {
   if (state.channelsLoading) return;
   state.channelsLoading = true;
+  setFetching('channels', true);
   try {
     const data = await backend.getChannels({ maxAgeMs });
     mergeDirectory(data);
@@ -651,6 +694,8 @@ async function loadChannels({ maxAgeMs } = {}) {
     console.error(err);
   } finally {
     state.channelsLoading = false;
+    setFetching('channels', false);
+    markUpdated();
   }
 }
 
@@ -995,7 +1040,12 @@ async function loadGregbot({ maxAgeMs = 0 } = {}) {
     $('#status').textContent = `Error: ${err.message}`;
     console.error(err);
   } finally {
-    state.gregbotLoading = false;
+    if (state.gregbotLoadingDays === days) {
+      state.gregbotLoading = false;
+      state.gregbotLoadingDays = undefined;
+      setFetching('gregbot', false);
+      markUpdated();
+    }
   }
 }
 
@@ -1049,7 +1099,12 @@ const VIEWS = {
     isLoaded: () => state.gregbotLoaded,
     unread: (item) => item.working, // Live tickets get the dot.
     grouped: false,
-    empty: () => (chipsOf('gregbot').length ? 'Nothing matches these filters.' : 'No gregbot threads in this window.'),
+    // Within is pinned, so it's always present — only chips beyond it mean the
+    // user actually narrowed something.
+    empty: () =>
+      chipsOf('gregbot').some((c) => c.facet !== 'age')
+        ? 'Nothing matches these filters.'
+        : 'No gregbot threads in this window.',
     footer: (n) => {
       const { working = 0, blocked = 0 } = state.gregbotCounts;
       const parts = [working && `${working} in progress`, blocked && `${blocked} awaiting approval`].filter(Boolean);
@@ -1074,15 +1129,7 @@ function setView(view) {
   if (!currentView().isLoaded()) currentView().load();
 }
 
-async function refreshView() {
-  const btn = $('#refresh');
-  btn.classList.add('spinning');
-  try {
-    await currentView().load();
-  } finally {
-    btn.classList.remove('spinning');
-  }
-}
+const refreshView = () => currentView().load();
 
 // ---------------------------------------------------------------------------
 // Thread detail

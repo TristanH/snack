@@ -253,5 +253,40 @@ export async function updateArchived(changes) {
 //   await snack.reloadExtension()   // pick up background/content script changes
 globalThis.snack = {
   call: (method, params) => withSession((s) => s.slack.call(method, params)),
+  // The gregbot service's actual state — what's cached, how far back it claims
+  // to cover, and whether a fetch is running.
+  gregbot: () =>
+    withSession((s) => {
+      const g = s.gregbot;
+      const ts = (t) => (t ? new Date(Number(t) * 1000).toLocaleString() : null);
+      const ages = [...g.threads.values()].map((t) => Number(t.lastTs)).sort((a, b) => a - b);
+      return {
+        cachedThreads: g.threads.size,
+        oldest: ts(ages[0]),
+        newest: ts(ages[ages.length - 1]),
+        coveredDays: g.coveredDays, // 0 = nothing, null = all-time
+        windowNow: g.days,
+        syncedTo: ts(g.syncedTo),
+        lastFetch: g.fetchedAt ? new Date(g.fetchedAt).toLocaleString() : null,
+        fetching: Boolean(g.inflight),
+        fetchingWindow: g.inflightDays,
+      };
+    }),
+  // What's actually being sent, and how much of it Slack bounced. Useful when
+  // something is rate limited and it isn't obvious which caller is to blame.
+  stats: (windowMs = 60_000) =>
+    withSession((s) => {
+      const since = Date.now() - windowMs;
+      const recent = s.slack.recent.filter((r) => r.at >= since);
+      const byMethod = {};
+      for (const r of recent) byMethod[r.method] = (byMethod[r.method] || 0) + 1;
+      return {
+        window: `${Math.round(windowMs / 1000)}s`,
+        total: recent.length,
+        searches: recent.filter((r) => r.method === 'search.messages').length,
+        rateLimitedSinceLoad: s.slack.throttled,
+        byMethod: Object.fromEntries(Object.entries(byMethod).sort((a, b) => b[1] - a[1])),
+      };
+    }),
   reloadExtension: () => platform.rpc('dev.reload'),
 };

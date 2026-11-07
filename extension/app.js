@@ -32,10 +32,11 @@ const state = {
   gregbotLoaded: false,
   gregbotLoading: false,
   // Faceted filter chips, per view (see filters.js). Inbox's Show chip is
-  // pinned — always present, never removable. Gregbot opens on Working.
+  // pinned — always present, never removable.
   chips: {
     inbox: [{ facet: 'show', value: 'all', label: 'All', facetLabel: 'Show' }],
-    gregbot: [{ facet: 'status', value: 'working', label: 'Working', facetLabel: 'Status' }],
+    // No Status chip by default: a dead run leaves a stale "Thinking…" and reads as Working.
+    gregbot: [{ facet: 'age', value: '30d', label: '1 month', facetLabel: 'Within' }],
   },
   sections: [],
   backTo: null, // { key, scrollTop } while viewing a thread opened from a conversation
@@ -800,8 +801,29 @@ function gregbotFacets() {
       ],
     },
     // Changes how far back we fetch, so only one at a time.
-    { key: 'age', label: 'Within', exclusive: true, values: [{ value: '3d', label: '3 days' }, { value: '7d', label: '7 days' }] },
+    {
+      key: 'age',
+      label: 'Within',
+      exclusive: true,
+      // Pinned: it sets the fetch window as well as filtering the list, so it
+      // can't be removed — otherwise display and fetch silently disagree.
+      pinned: true,
+      // Bounded on purpose: all-time cost ~50 sequential search pages.
+      values: [
+        { value: '7d', label: '7 days' },
+        { value: '30d', label: '1 month' },
+        { value: '60d', label: '2 months' },
+      ],
+    },
   ];
+}
+
+// Midnight local, `days` ago. Must match lib/gregbot.js's copy.
+function dayCutoff(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() / 1000;
 }
 
 const CHIP_MATCH = {
@@ -810,7 +832,7 @@ const CHIP_MATCH = {
   status: (t, v) => (v === 'working' ? t.working : !t.working),
   is: (t, v) => (v === 'blocked' ? Boolean(t.blocked) : isStale(t)),
   has: (t, v) => Boolean(t.did?.[v]),
-  age: (t, v) => Number(t.lastTs) >= Date.now() / 1000 - parseInt(v, 10) * 86400,
+  age: (t, v) => Number(t.lastTs) >= dayCutoff(parseInt(v, 10)),
 };
 
 // Several values of one facet are OR'd (a thread both artem and tristan called
@@ -826,7 +848,10 @@ function matchesChips(item, chips) {
 }
 
 // How far back to fetch; the Within chip decides.
-const gregbotDays = () => parseInt(chipsOf('gregbot').find((c) => c.facet === 'age')?.value || '', 10) || 3;
+function gregbotDays() {
+  const chosen = chipsOf('gregbot').find((c) => c.facet === 'age')?.value;
+  return parseInt(chosen || '', 10) || 30;
+}
 
 function visibleGregbot() {
   const q = state.query.trim().toLowerCase();

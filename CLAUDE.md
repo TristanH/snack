@@ -74,7 +74,7 @@ in the box and searches the thread text.
 | `status` | Status | `working` / `done` — **exclusive** |
 | `is` | Is | `blocked` (awaiting prod-script approval), `quiet` (working but silent >30m) |
 | `has` | Has | `pr`, `linear` |
-| `age` | Within | `3d` / `7d` — **exclusive**, and changes how far back we fetch |
+| `age` | Within | `7d` / `30d` / `60d` — **exclusive**, and changes how far back we fetch. Two months is the ceiling: `search.messages` is rate-limited and a wider sweep costs minutes |
 
 The Inbox has one facet, `show` (`all` / `unread` / `archived`), which is
 **pinned**: always present, not removable, click it to switch.

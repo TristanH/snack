@@ -31,11 +31,13 @@ const state = {
   gregbotCallers: [],
   gregbotLoaded: false,
   gregbotLoading: false,
+  gregbotLoadingDays: undefined,
   // Faceted filter chips, per view (see filters.js). Inbox's Show chip is
-  // pinned — always present, never removable. Gregbot opens on Working.
+  // pinned — always present, never removable.
   chips: {
     inbox: [{ facet: 'show', value: 'all', label: 'All', facetLabel: 'Show' }],
-    gregbot: [{ facet: 'status', value: 'working', label: 'Working', facetLabel: 'Status' }],
+    // No Status chip by default: a dead run leaves a stale "Thinking…" and reads as Working.
+    gregbot: [{ facet: 'age', value: '30d', label: '1 month', facetLabel: 'Within' }],
   },
   sections: [],
   backTo: null, // { key, scrollTop } while viewing a thread opened from a conversation
@@ -242,9 +244,7 @@ function permalink(channel, ts, threadTs) {
 // ---------------------------------------------------------------------------
 // Inbox: threads you're in, DMs and @-mentions, as one list.
 
-// An archived item stays out of the inbox until something newer than what
-// you archived arrives, then it's back. (Mentions never change, so archiving
-// one is permanent.)
+// An archived item comes back once something newer than its archive stamp arrives.
 function isArchived(item) {
   const ts = state.archived[item.key];
   return Boolean(ts) && Number(item.lastTs) <= Number(ts);
@@ -262,9 +262,7 @@ function inboxHaystack(item) {
 const chipsOf = (view) => state.chips[view] || [];
 const chipValue = (view, facet) => chipsOf(view).find((c) => c.facet === facet)?.value;
 
-// The Inbox's only facet, and a pinned one: it always has exactly one value,
-// so it reads as a permanent chip you click to switch rather than a chip you
-// add and remove.
+// The Inbox's only facet, and a pinned one: always exactly one value.
 function inboxFacets() {
   const items = state.inboxItems;
   const archived = items.filter(isArchived).length;
@@ -397,7 +395,48 @@ function renderList() {
   $('#list-footer').textContent = view.footer(items.length);
 }
 
+// One source of truth for "is Snack fetching anything"; every loader registers here.
+const fetching = new Map(); // name -> detail string ('' for no detail)
+
+function renderActivity() {
+  const busy = fetching.size > 0;
+  $('#refresh').classList.toggle('spinning', busy);
+  $('.app').classList.toggle('busy', busy);
+  if (!busy) return;
+  // Prefer a detailed message ("Gregbot 12/37") over the generic one.
+  const detail = [...fetching.values()].find(Boolean);
+  $('#status').textContent = detail || 'Syncing…';
+}
+
+// A warm refresh finishes too fast to see, so hold the indicator a beat.
+const MIN_BUSY_MS = 650;
+let busySince = 0;
+let holdTimer = null;
+
+function setFetching(name, on, detail = '') {
+  if (on) {
+    if (!fetching.size) busySince = Date.now();
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    fetching.set(name, detail);
+    return renderActivity();
+  }
+  fetching.delete(name);
+  if (fetching.size) return renderActivity(); // Something else is still going.
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    renderActivity();
+    // Only stamp over our own busy text — never over an error a loader set.
+    const shown = $('#status').textContent;
+    if (shown.startsWith('Syncing') || shown.startsWith('Gregbot')) markUpdated();
+  }, Math.max(0, MIN_BUSY_MS - (Date.now() - busySince)));
+}
+
 const markUpdated = () => {
+  // Don't stamp "Updated" over a sibling fetch that's still going, or over the
+  // minimum-visible hold — the hold stamps it itself when it expires.
+  if (fetching.size || holdTimer) return;
   $('#status').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 };
 
@@ -415,14 +454,13 @@ function applyInbox(data) {
 async function loadInbox({ full = false } = {}) {
   if (state.loading) return;
   state.loading = true;
-  $('#refresh').classList.add('spinning');
-  if (full || !state.inboxItems.length) $('#status').textContent = 'Loading…';
+  setFetching('inbox', true);
   try {
     const data = await backend.getInbox({
       full,
       onUpdate: (update) => {
         applyInbox(update);
-        if (!update.progress.done) $('#status').textContent = 'Syncing threads…';
+        if (!update.progress.done) setFetching('inbox', true, 'Syncing threads…');
       },
     });
     applyInbox(data);
@@ -433,7 +471,8 @@ async function loadInbox({ full = false } = {}) {
     console.error(err);
   } finally {
     state.loading = false;
-    $('#refresh').classList.remove('spinning');
+    setFetching('inbox', false);
+    markUpdated();
   }
 }
 
@@ -635,12 +674,11 @@ function channelRowHtml(c) {
     </div>`;
 }
 
-// maxAgeMs: passed through to the service's age guard. Omit it for a
-// background pass (15s default, so it doesn't duplicate getInbox's fetch);
-// pass 0 to force, which is what ⇧R and opening the tab do.
+// maxAgeMs: passed through to the service's age guard.
 async function loadChannels({ maxAgeMs } = {}) {
   if (state.channelsLoading) return;
   state.channelsLoading = true;
+  setFetching('channels', true);
   try {
     const data = await backend.getChannels({ maxAgeMs });
     mergeDirectory(data);
@@ -656,6 +694,8 @@ async function loadChannels({ maxAgeMs } = {}) {
     console.error(err);
   } finally {
     state.channelsLoading = false;
+    setFetching('channels', false);
+    markUpdated();
   }
 }
 
@@ -754,9 +794,6 @@ function advanceAfterRemoving(key, wasOpen) {
 }
 
 // ---------------------------------------------------------------------------
-// Gregbot: the threads gregbot is working in. A ticket is the human's thread,
-// found through gregbot's own replies; gregbot's newest reply says whether it's
-// still being worked on (see lib/gregbot.js).
 
 // Working, but silent for this long: probably stuck, and worth saying so.
 const STALE_MS = 30 * 60 * 1000;
@@ -770,9 +807,7 @@ function sinceText(ts) {
   return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
-// Facets for the filter box, with a count per value. Counts are over
-// everything loaded, not what's currently filtered, so they don't shift as you
-// narrow. Empty value lists are dropped so the menu never offers a dead end.
+// Facets for the filter box, with a count per value.
 function gregbotFacets() {
   const items = state.gregbotItems;
   const tally = (valuesOf) => {
@@ -811,8 +846,29 @@ function gregbotFacets() {
       ],
     },
     // Changes how far back we fetch, so only one at a time.
-    { key: 'age', label: 'Within', exclusive: true, values: [{ value: '3d', label: '3 days' }, { value: '7d', label: '7 days' }] },
+    {
+      key: 'age',
+      label: 'Within',
+      exclusive: true,
+      // Pinned: it sets the fetch window as well as filtering the list, so it
+      // can't be removed — otherwise display and fetch silently disagree.
+      pinned: true,
+      // Bounded on purpose: all-time cost ~50 sequential search pages.
+      values: [
+        { value: '7d', label: '7 days' },
+        { value: '30d', label: '1 month' },
+        { value: '60d', label: '2 months' },
+      ],
+    },
   ];
+}
+
+// Midnight local, `days` ago. Must match lib/gregbot.js's copy.
+function dayCutoff(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() / 1000;
 }
 
 const CHIP_MATCH = {
@@ -821,7 +877,7 @@ const CHIP_MATCH = {
   status: (t, v) => (v === 'working' ? t.working : !t.working),
   is: (t, v) => (v === 'blocked' ? Boolean(t.blocked) : isStale(t)),
   has: (t, v) => Boolean(t.did?.[v]),
-  age: (t, v) => Number(t.lastTs) >= Date.now() / 1000 - parseInt(v, 10) * 86400,
+  age: (t, v) => Number(t.lastTs) >= dayCutoff(parseInt(v, 10)),
 };
 
 // Several values of one facet are OR'd (a thread both artem and tristan called
@@ -837,18 +893,72 @@ function matchesChips(item, chips) {
 }
 
 // How far back to fetch; the Within chip decides.
-const gregbotDays = () => parseInt(chipsOf('gregbot').find((c) => c.facet === 'age')?.value || '', 10) || 3;
+function gregbotDays() {
+  const chosen = chipsOf('gregbot').find((c) => c.facet === 'age')?.value;
+  return parseInt(chosen || '', 10) || 30;
+}
+
+// Built once per item and cached on it.
+function gregbotHaystack(t) {
+  if (t.haystack === undefined) {
+    t.haystack = [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), plain(t.searchText || '')]
+      .join(' ')
+      .toLowerCase();
+  }
+  return t.haystack;
+}
+
+// Do a and b differ by at most one insertion, deletion or substitution?
+function within1(a, b) {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i++;
+      j++;
+    } else if (++edits > 1) {
+      return false;
+    } else if (short.length === long.length) {
+      i++;
+      j++;
+    } else {
+      j++;
+    }
+  }
+  return true;
+}
+
+// Typo tolerance, but only as a fallback — see visibleGregbot.
+function looselyHas(t, token) {
+  if (token.length < 4) return false;
+  t.words ??= [...new Set(gregbotHaystack(t).split(/[^a-z0-9]+/))].filter((w) => w.length > 2);
+  return t.words.some((w) => Math.abs(w.length - token.length) <= 1 && within1(w, token));
+}
 
 function visibleGregbot() {
-  const q = state.query.trim().toLowerCase();
   const chips = chipsOf('gregbot');
-  return state.gregbotItems.filter((t) => {
-    if (!matchesChips(t, chips)) return false;
-    if (!q) return true;
-    return [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), ...messageTexts(t.last).map(plain)]
-      .join(' ')
-      .toLowerCase()
-      .includes(q);
+  // Chips first — cheap, and they shrink the set the text search runs over.
+  const pool = state.gregbotItems.filter((t) => matchesChips(t, chips));
+  const tokens = state.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return pool;
+
+  // Every token has to appear somewhere, in any order — so "tts timer sleep"
+  // finds a sleep-timer thread in #tts.
+  const exact = pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok));
+  });
+  if (exact.length) return exact;
+
+  // Nothing matched exactly, so retry allowing one typo per token. Running
+  // this only on a miss keeps the common case a plain substring scan.
+  return pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok) || looselyHas(t, tok));
   });
 }
 
@@ -883,15 +993,41 @@ function gregbotRowHtml(t) {
     </div>`;
 }
 
-// maxAgeMs: skip if refreshed that recently. A refresh is two paged searches
-// and search.messages is rate-limited tightly, so the periodic one passes a
-// couple of minutes; opening the view or pressing ⇧R forces it.
+// maxAgeMs: skip if refreshed that recently.
+const PROGRESS_RENDER_MS = 400;
+let lastProgressRender = 0;
+
 async function loadGregbot({ maxAgeMs = 0 } = {}) {
-  if (state.gregbotLoading) return;
+  const days = gregbotDays();
+  // Only bail if the same window is already loading — switching to a narrower
+  // one must be able to interrupt a long all-time page-through.
+  if (state.gregbotLoading && state.gregbotLoadingDays === days) return;
   state.gregbotLoading = true;
+  state.gregbotLoadingDays = days;
+  setFetching('gregbot', true);
   try {
     // A skipped refresh still returns a snapshot, just of unchanged data.
-    const data = await backend.getGregbot({ days: gregbotDays(), maxAgeMs });
+    const data = await backend.getGregbot({
+      days,
+      maxAgeMs,
+      // Render what has arrived rather than waiting for the whole sweep.
+      onProgress: async ({ page, pages }) => {
+        if (state.gregbotLoadingDays !== days) return;
+        // A snapshot re-scans every thread, so throttle the per-page renders.
+        const now = Date.now();
+        if (page < pages && now - lastProgressRender < PROGRESS_RENDER_MS) return;
+        lastProgressRender = now;
+        const partial = await backend.gregbotSnapshot();
+        if (state.gregbotLoadingDays !== days) return;
+        mergeDirectory(partial);
+        state.gregbotItems = partial.items;
+        state.gregbotCounts = partial.counts;
+        state.gregbotCallers = partial.callers;
+        state.gregbotLoaded = true;
+        renderList();
+      },
+    });
+    if (state.gregbotLoadingDays !== days) return; // Superseded.
     mergeDirectory(data);
     state.gregbotItems = data.items;
     state.gregbotCounts = data.counts;
@@ -904,7 +1040,12 @@ async function loadGregbot({ maxAgeMs = 0 } = {}) {
     $('#status').textContent = `Error: ${err.message}`;
     console.error(err);
   } finally {
-    state.gregbotLoading = false;
+    if (state.gregbotLoadingDays === days) {
+      state.gregbotLoading = false;
+      state.gregbotLoadingDays = undefined;
+      setFetching('gregbot', false);
+      markUpdated();
+    }
   }
 }
 
@@ -915,8 +1056,6 @@ function openGregbotThread(key) {
 }
 
 // ---------------------------------------------------------------------------
-// Views. Each one is a list of items plus how to render, open and load them;
-// everything below reads this table instead of testing state.view.
 
 function openInboxItem(key) {
   const item = state.inboxItems.find((i) => i.key === key);
@@ -960,7 +1099,12 @@ const VIEWS = {
     isLoaded: () => state.gregbotLoaded,
     unread: (item) => item.working, // Live tickets get the dot.
     grouped: false,
-    empty: () => (chipsOf('gregbot').length ? 'Nothing matches these filters.' : 'No gregbot threads in this window.'),
+    // Within is pinned, so it's always present — only chips beyond it mean the
+    // user actually narrowed something.
+    empty: () =>
+      chipsOf('gregbot').some((c) => c.facet !== 'age')
+        ? 'Nothing matches these filters.'
+        : 'No gregbot threads in this window.',
     footer: (n) => {
       const { working = 0, blocked = 0 } = state.gregbotCounts;
       const parts = [working && `${working} in progress`, blocked && `${blocked} awaiting approval`].filter(Boolean);
@@ -985,15 +1129,7 @@ function setView(view) {
   if (!currentView().isLoaded()) currentView().load();
 }
 
-async function refreshView() {
-  const btn = $('#refresh');
-  btn.classList.add('spinning');
-  try {
-    await currentView().load();
-  } finally {
-    btn.classList.remove('spinning');
-  }
-}
+const refreshView = () => currentView().load();
 
 // ---------------------------------------------------------------------------
 // Thread detail
@@ -1036,8 +1172,6 @@ function blocksHtml(blocks) {
 }
 
 // ---------------------------------------------------------------------------
-// Media: images, video and PDF thumbnails inline (as in Slack); click an image
-// to see it full size.
 
 const MEDIA_MAX_W = 360;
 const MEDIA_MAX_H = 260;
@@ -1050,9 +1184,7 @@ function mediaBox(w, h, maxW = MEDIA_MAX_W, maxH = MEDIA_MAX_H) {
   return `width:${Math.max(40, Math.round(w * scale))}px;aspect-ratio:${w}/${h}`;
 }
 
-// src: a public image URL. slack: a files.slack.com URL, which needs your
-// session and so loads through the extension (see hydrateMedia).
-// full: shown when clicked; href: opened instead (videos, PDFs).
+// src: a public image URL. slack: a files.slack.com URL, which needs auth.
 function mediaHtml({ src, slack, w, h, full, href, play = false, alt = '' }) {
   const img = slack
     ? `<img data-slack-src="${escapeHtml(slack)}" alt="${escapeHtml(alt)}" />`
@@ -1746,8 +1878,6 @@ function bindEmojiPicker() {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard shortcuts. This one table drives the key handler, the hover
-// tooltips (via data-shortcut) and the ? overlay.
 
 const SHORTCUTS = {
   next: { group: 'Navigate', label: 'Next', show: ['J'], keys: ['j', 'ArrowDown'], run: () => moveSelection(1) },
@@ -2001,11 +2131,7 @@ function sizeBrand() {
   if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
 }
 
-// Runs the brand animation on load, and again on hover. Restarting a CSS
-// animation needs the class taken off, a forced reflow so that removal is
-// actually committed, then the class put back — without the reflow the browser
-// coalesces both changes and nothing happens. Must run after sizeBrand(), which
-// sets the --brand-shift the animation lands on.
+// Runs the brand animation on load, and again on hover.
 function bindBrand() {
   const brand = $('.brand');
   if (!brand) return;

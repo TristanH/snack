@@ -50,6 +50,8 @@ export function attachFilters(input, { facets, chips, onChange }) {
     { passive: false },
   );
 
+  // -1 = nothing highlighted, so Enter can't pick a row nobody chose.
+  const NONE = -1;
   let open = null; // { facet: key|null, results, active }
 
   const current = () => chips() || [];
@@ -272,7 +274,7 @@ export function attachFilters(input, { facets, chips, onChange }) {
   }
 
   function show() {
-    open = { facet: open?.facet || null, results: [], active: 0 };
+    open = { facet: open?.facet || null, results: [], active: NONE };
     render();
   }
 
@@ -281,14 +283,14 @@ export function attachFilters(input, { facets, chips, onChange }) {
     if (!r) return;
     if (r.kind === 'facet') {
       open.facet = r.facet; // Drill into its values.
-      open.active = 0;
+      open.active = NONE;
       input.value = '';
       return render();
     }
     addChip(r.facet, r.v);
     input.value = '';
     open.facet = null;
-    open.active = 0;
+    open.active = NONE;
     render();
   }
 
@@ -309,7 +311,7 @@ export function attachFilters(input, { facets, chips, onChange }) {
   input.addEventListener('click', show);
   input.addEventListener('input', () => {
     if (open) {
-      open.active = 0;
+      open.active = NONE;
       render();
     }
   });
@@ -353,6 +355,9 @@ export function attachFilters(input, { facets, chips, onChange }) {
       return render();
     }
     if (e.key === 'Enter') {
+      // Nothing highlighted: Enter belongs to the host, which blurs and jumps
+      // into the list. Only claim it once a row is actually selected.
+      if (open.active < 0) return;
       claim(e);
       return pick(open.active);
     }
@@ -380,7 +385,7 @@ export function attachFilters(input, { facets, chips, onChange }) {
     const c = chip && current()[Number(chip.dataset.i)];
     if (!c || !isPinned(c)) return;
     input.value = '';
-    open = { facet: c.facet, results: [], active: 0 };
+    open = { facet: c.facet, results: [], active: NONE };
     render();
     input.focus();
   });

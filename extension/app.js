@@ -853,16 +853,67 @@ function gregbotDays() {
   return parseInt(chosen || '', 10) || 30;
 }
 
-function visibleGregbot() {
-  const q = state.query.trim().toLowerCase();
-  const chips = chipsOf('gregbot');
-  return state.gregbotItems.filter((t) => {
-    if (!matchesChips(t, chips)) return false;
-    if (!q) return true;
-    return [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), ...messageTexts(t.last).map(plain)]
+// Built once per item and cached on it.
+function gregbotHaystack(t) {
+  if (t.haystack === undefined) {
+    t.haystack = [channelLabel(t.channel), t.ask, t.step, ...t.callers.map(userName), plain(t.searchText || '')]
       .join(' ')
-      .toLowerCase()
-      .includes(q);
+      .toLowerCase();
+  }
+  return t.haystack;
+}
+
+// Do a and b differ by at most one insertion, deletion or substitution?
+function within1(a, b) {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i++;
+      j++;
+    } else if (++edits > 1) {
+      return false;
+    } else if (short.length === long.length) {
+      i++;
+      j++;
+    } else {
+      j++;
+    }
+  }
+  return true;
+}
+
+// Typo tolerance, but only as a fallback — see visibleGregbot.
+function looselyHas(t, token) {
+  if (token.length < 4) return false;
+  t.words ??= [...new Set(gregbotHaystack(t).split(/[^a-z0-9]+/))].filter((w) => w.length > 2);
+  return t.words.some((w) => Math.abs(w.length - token.length) <= 1 && within1(w, token));
+}
+
+function visibleGregbot() {
+  const chips = chipsOf('gregbot');
+  // Chips first — cheap, and they shrink the set the text search runs over.
+  const pool = state.gregbotItems.filter((t) => matchesChips(t, chips));
+  const tokens = state.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return pool;
+
+  // Every token has to appear somewhere, in any order — so "tts timer sleep"
+  // finds a sleep-timer thread in #tts.
+  const exact = pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok));
+  });
+  if (exact.length) return exact;
+
+  // Nothing matched exactly, so retry allowing one typo per token. Running
+  // this only on a miss keeps the common case a plain substring scan.
+  return pool.filter((t) => {
+    const hay = gregbotHaystack(t);
+    return tokens.every((tok) => hay.includes(tok) || looselyHas(t, tok));
   });
 }
 

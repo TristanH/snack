@@ -242,9 +242,7 @@ function permalink(channel, ts, threadTs) {
 // ---------------------------------------------------------------------------
 // Inbox: threads you're in, DMs and @-mentions, as one list.
 
-// An archived item stays out of the inbox until something newer than what
-// you archived arrives, then it's back. (Mentions never change, so archiving
-// one is permanent.)
+// An archived item comes back once something newer than its archive stamp arrives.
 function isArchived(item) {
   const ts = state.archived[item.key];
   return Boolean(ts) && Number(item.lastTs) <= Number(ts);
@@ -262,9 +260,7 @@ function inboxHaystack(item) {
 const chipsOf = (view) => state.chips[view] || [];
 const chipValue = (view, facet) => chipsOf(view).find((c) => c.facet === facet)?.value;
 
-// The Inbox's only facet, and a pinned one: it always has exactly one value,
-// so it reads as a permanent chip you click to switch rather than a chip you
-// add and remove.
+// The Inbox's only facet, and a pinned one: always exactly one value.
 function inboxFacets() {
   const items = state.inboxItems;
   const archived = items.filter(isArchived).length;
@@ -635,9 +631,7 @@ function channelRowHtml(c) {
     </div>`;
 }
 
-// maxAgeMs: passed through to the service's age guard. Omit it for a
-// background pass (15s default, so it doesn't duplicate getInbox's fetch);
-// pass 0 to force, which is what ⇧R and opening the tab do.
+// maxAgeMs: passed through to the service's age guard.
 async function loadChannels({ maxAgeMs } = {}) {
   if (state.channelsLoading) return;
   state.channelsLoading = true;
@@ -754,9 +748,6 @@ function advanceAfterRemoving(key, wasOpen) {
 }
 
 // ---------------------------------------------------------------------------
-// Gregbot: the threads gregbot is working in. A ticket is the human's thread,
-// found through gregbot's own replies; gregbot's newest reply says whether it's
-// still being worked on (see lib/gregbot.js).
 
 // Working, but silent for this long: probably stuck, and worth saying so.
 const STALE_MS = 30 * 60 * 1000;
@@ -770,9 +761,7 @@ function sinceText(ts) {
   return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
-// Facets for the filter box, with a count per value. Counts are over
-// everything loaded, not what's currently filtered, so they don't shift as you
-// narrow. Empty value lists are dropped so the menu never offers a dead end.
+// Facets for the filter box, with a count per value.
 function gregbotFacets() {
   const items = state.gregbotItems;
   const tally = (valuesOf) => {
@@ -883,15 +872,41 @@ function gregbotRowHtml(t) {
     </div>`;
 }
 
-// maxAgeMs: skip if refreshed that recently. A refresh is two paged searches
-// and search.messages is rate-limited tightly, so the periodic one passes a
-// couple of minutes; opening the view or pressing ⇧R forces it.
+// maxAgeMs: skip if refreshed that recently.
+const PROGRESS_RENDER_MS = 400;
+let lastProgressRender = 0;
+
 async function loadGregbot({ maxAgeMs = 0 } = {}) {
-  if (state.gregbotLoading) return;
+  const days = gregbotDays();
+  // Only bail if the same window is already loading — switching to a narrower
+  // one must be able to interrupt a long all-time page-through.
+  if (state.gregbotLoading && state.gregbotLoadingDays === days) return;
   state.gregbotLoading = true;
+  state.gregbotLoadingDays = days;
+  setFetching('gregbot', true);
   try {
     // A skipped refresh still returns a snapshot, just of unchanged data.
-    const data = await backend.getGregbot({ days: gregbotDays(), maxAgeMs });
+    const data = await backend.getGregbot({
+      days,
+      maxAgeMs,
+      // Render what has arrived rather than waiting for the whole sweep.
+      onProgress: async ({ page, pages }) => {
+        if (state.gregbotLoadingDays !== days) return;
+        // A snapshot re-scans every thread, so throttle the per-page renders.
+        const now = Date.now();
+        if (page < pages && now - lastProgressRender < PROGRESS_RENDER_MS) return;
+        lastProgressRender = now;
+        const partial = await backend.gregbotSnapshot();
+        if (state.gregbotLoadingDays !== days) return;
+        mergeDirectory(partial);
+        state.gregbotItems = partial.items;
+        state.gregbotCounts = partial.counts;
+        state.gregbotCallers = partial.callers;
+        state.gregbotLoaded = true;
+        renderList();
+      },
+    });
+    if (state.gregbotLoadingDays !== days) return; // Superseded.
     mergeDirectory(data);
     state.gregbotItems = data.items;
     state.gregbotCounts = data.counts;
@@ -915,8 +930,6 @@ function openGregbotThread(key) {
 }
 
 // ---------------------------------------------------------------------------
-// Views. Each one is a list of items plus how to render, open and load them;
-// everything below reads this table instead of testing state.view.
 
 function openInboxItem(key) {
   const item = state.inboxItems.find((i) => i.key === key);
@@ -1036,8 +1049,6 @@ function blocksHtml(blocks) {
 }
 
 // ---------------------------------------------------------------------------
-// Media: images, video and PDF thumbnails inline (as in Slack); click an image
-// to see it full size.
 
 const MEDIA_MAX_W = 360;
 const MEDIA_MAX_H = 260;
@@ -1050,9 +1061,7 @@ function mediaBox(w, h, maxW = MEDIA_MAX_W, maxH = MEDIA_MAX_H) {
   return `width:${Math.max(40, Math.round(w * scale))}px;aspect-ratio:${w}/${h}`;
 }
 
-// src: a public image URL. slack: a files.slack.com URL, which needs your
-// session and so loads through the extension (see hydrateMedia).
-// full: shown when clicked; href: opened instead (videos, PDFs).
+// src: a public image URL. slack: a files.slack.com URL, which needs auth.
 function mediaHtml({ src, slack, w, h, full, href, play = false, alt = '' }) {
   const img = slack
     ? `<img data-slack-src="${escapeHtml(slack)}" alt="${escapeHtml(alt)}" />`
@@ -1746,8 +1755,6 @@ function bindEmojiPicker() {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard shortcuts. This one table drives the key handler, the hover
-// tooltips (via data-shortcut) and the ? overlay.
 
 const SHORTCUTS = {
   next: { group: 'Navigate', label: 'Next', show: ['J'], keys: ['j', 'ArrowDown'], run: () => moveSelection(1) },
@@ -2001,11 +2008,7 @@ function sizeBrand() {
   if (shift > 0) brand.style.setProperty('--brand-shift', `${shift.toFixed(3)}px`);
 }
 
-// Runs the brand animation on load, and again on hover. Restarting a CSS
-// animation needs the class taken off, a forced reflow so that removal is
-// actually committed, then the class put back — without the reflow the browser
-// coalesces both changes and nothing happens. Must run after sizeBrand(), which
-// sets the --brand-shift the animation lands on.
+// Runs the brand animation on load, and again on hover.
 function bindBrand() {
   const brand = $('.brand');
   if (!brand) return;

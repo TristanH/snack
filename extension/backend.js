@@ -27,7 +27,7 @@ async function open(team) {
   const mentions = new MentionService(slack, directory, auth.user_id);
   const dms = new DmService(slack, directory, auth.user_id);
   const gregbot = new GregbotService(slack, directory);
-  await Promise.all([directory.load(), threads.load()]);
+  await Promise.all([directory.load(), threads.load(), gregbot.load()]);
   return { slack, directory, threads, channels, mentions, dms, gregbot, auth };
 }
 
@@ -144,8 +144,6 @@ export const getMentionables = () =>
   });
 
 // Unread channels/DMs, minus muted and ignored ones.
-// maxAgeMs defaults to 15s so a background pass doesn't re-fetch client.counts
-// that getInbox just fetched. An explicit refresh passes 0 to force it.
 export const getChannels = ({ maxAgeMs = 15_000 } = {}) =>
   withSession(async (s) => {
     await s.channels.refresh({ maxAgeMs });
@@ -192,6 +190,9 @@ export const getInbox = ({ full = false, onUpdate } = {}) =>
   });
 
 export const getConversation = (channel, lastRead) => withSession((s) => s.dms.conversation(channel, lastRead));
+
+// Whatever the service holds right now, without fetching.
+export const gregbotSnapshot = () => withSession((s) => s.gregbot.snapshot());
 
 // Threads gregbot is working in, newest activity first (see lib/gregbot.js).
 export const getGregbot = ({ days, maxAgeMs } = {}) =>
@@ -249,8 +250,6 @@ export async function updateArchived(changes) {
 }
 
 // Dev helpers, from DevTools on the Snack page:
-//   await snack.call('subscriptions.thread.getView', { limit: 2 })
-//   await snack.reloadExtension()   // pick up background/content script changes
 globalThis.snack = {
   call: (method, params) => withSession((s) => s.slack.call(method, params)),
   // The gregbot service's actual state — what's cached, how far back it claims
